@@ -1,0 +1,2 @@
+le_utils>=0.1.4
+ricecooker>=0.6.11
