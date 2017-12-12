@@ -63,8 +63,16 @@ def scrape_source(writer):
     LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
     #resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
     #resource_browser.run()
-    collection = Collection("https://www.teachengineering.org/activities/view/cub_human_lesson06_activity1")
-    collection.parse()
+    url = "https://www.teachengineering.org/activities/view/cub_human_lesson06_activity1"
+    try:
+        subtopic_name = "test"
+        document = downloader.read(url, loadjs=False)#, session=sess)
+        page = BeautifulSoup(document, 'html.parser')
+        collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip", 
+            source_id=url)
+        collection.to_file(PATH, ["activities"])
+    except requests.exceptions.HTTPError as e:
+        LOGGER.info("Error: {}".format(e))
 
 
 class ResourceBrowser(object):
@@ -110,8 +118,14 @@ class ResourceBrowser(object):
             #num_registers = data["@odata.count"]
             for resource in data["value"]:
                 url = self.build_resource_url(resource["id"], resource["collection"])
-                collection = Collection(url)
-                time.sleep(1)
+                try:
+                    document = downloader.read(self.resource_url, loadjs=False)#, session=sess)
+                    page = BeautifulSoup(document, 'html.parser')
+                except requests.exceptions.HTTPError as e:
+                    LOGGER.info("Error: {}".format(e))
+                else:
+                    collection = Collection(page)
+                    time.sleep(1)
                 break
             return
 
@@ -119,42 +133,130 @@ class ResourceBrowser(object):
         return urljoin(BASE_URL, collection.lower()+"/view/"+id_name)
 
 
+class Menu(object):
+    """
+        This class checks elements on the lesson menu and build the menu list
+    """
+    def __init__(self, page, filename=None, id_=None):
+        self.body = page.find("div", id=id_)
+        self.menu = OrderedDict()
+        self.filename = filename
+        self.menu_titles(self.body.find_all("li"))
+
+    def write(self, content):
+        with html_writer.HTMLWriter(self.filename, "w") as zipper:
+            zipper.write_index_contents(content)
+
+    def to_file(self):
+        self.write('<html><body><meta charset="UTF-8"></head><ul>'+self.to_html()+'</ul></body></html>')
+
+    def menu_titles(self, titles):
+        for title in titles:
+            self.add(title.text)
+
+    def get(self, name):
+        try:
+            return self.menu[name]["filename"]
+        except KeyError:
+            return None
+
+    def add(self, title):
+        name = title.lower().strip().replace(" ", "_").replace("/", "_")
+        self.menu[name] = {
+            "filename": "{}.html".format(name),
+            "text": title
+        }
+
+    def to_html(self, directory="files/", active_li=None):
+        li = []
+        for e in self.menu.values():
+            li.append("<li>")
+            if active_li is not None and e["filename"] == active_li:
+                li.append('{text}'.format(text=e["text"]))
+            else:
+                li.append('<a href="{directory}{filename}">{text}</a>'.format(directory=directory, **e))
+            li.append("</li>")
+        return "".join(li)
+
+
 class Collection(object):
-    def __init__(self, resource_url):
-        self.title = None
-        self.title_prefix = None
+    def __init__(self, page, filepath, source_id):
+        self.page = page
+        self.title_prefix = self.clean_title(self.page.find("span", class_="title-prefix"))
+        self.title = self.clean_title(self.page.find("span", class_="curriculum-title"))
         self.contribution_by = None
-        self.resource_url = resource_url
+        self.menu = Menu(self.page, filename=filepath, id_="CurriculumNav")
+        self.source_id = source_id
         self.sections = [
             Summary,
-            EngineeringConnection,
+            #EngineeringConnection,
             LearningObjetives,
-            MoreLikeThis
+            MoreLikeThis,
+            MaterialsList,
+            Introduction,
+            Procedure,
+            Attachments,
+            Troubleshooting,
+            Assessment,
+            ActivityExtensions,
+            References
         ]
 
-    def parse(self):
-        try:
-            page_contents = downloader.read(self.resource_url, loadjs=False)#, session=sess)
-            page = BeautifulSoup(page_contents, 'html.parser')
-            title_prefix = page.find("span", class_="title-prefix")
-            title = page.find("span", class_="curriculum-title")
-            
-            for Section in self.sections:
-                section = Section(page)
-                print(section.get_content())
+    def clean_title(self, title):
+        if title is not None:
+            return title.text.strip()
+        return title
 
-        except requests.exceptions.HTTPError as e:
-            LOGGER.info("Error: {}".format(e))
+    def to_file(self, PATH, levels):
+        LOGGER.info(" + Curriculum:"+ self.title)
+        self.menu.to_file()
+        for Section in self.sections:
+            section = Section(self.page, filename=self.menu.filename)
+            menu_filename = self.menu.get(section.menu_name)
+            menu_index = self.menu.to_html(directory="", active_li=menu_filename)
+            section.to_file(menu_filename, menu_index=menu_index)
+
+        metadata_dict = {"description": "",
+            "language": "en",
+            "license": licenses.CC_BY,
+            "copyright_holder": "National Endowment for the Humanities",
+            "author": "",
+            "source_id": self.source_id}
+
+        levels.append(self.title.replace("/", "-"))
+        PATH.set(*levels)
+        writer.add_file(str(PATH), "Curriculum", self.menu.filename, **metadata_dict)
+        #writer.add_folder(str(PATH), "RESOURCES", **metadata_dict)
+        #PATH.set(*(levels+["RESOURCES"]))
+        #for name, pdf_url in self.resources.get_pdfs():
+        #    meta = metadata_dict.copy()
+        #    meta["source_id"] = pdf_url
+        #    try:
+        #        writer.add_file(str(PATH), name.replace(".pdf", ""), pdf_url, **meta)
+        #    except requests.exceptions.HTTPError as e:
+        #        LOGGER.info("Error: {}".format(e))
+        if if_file_exists(self.menu.filename):
+            #writer.add_file(str(PATH), "MEDIA", self.resources.filename, **metadata_dict)
+            self.rm(self.menu.filename)
+        #resource.student_resources() external web page
+        PATH.go_to_parent_folder()
+        #PATH.go_to_parent_folder()
+
+    def rm(self, filepath):
+        os.remove(filepath)
 
 
 class CollectionSection(object):
     def __init__(self,  page, filename=None, id_=None, menu_name=None):
         LOGGER.debug(id_)
+        self.id = id_
         self.body = page.find("section", id=id_)
         if self.body is not None:
             h3 = self.body.find("h3")
             self.title = self.clean_title(h3)
             del h3
+        else:
+            self.title = None
         self.filename = filename
         self.menu_name = menu_name
 
@@ -168,16 +270,34 @@ class CollectionSection(object):
         #remove_links(content)
         return "".join([str(p) for p in content])
 
+    def write(self, filename, content):
+        with html_writer.HTMLWriter(self.filename, "a") as zipper:
+            zipper.write_contents(filename, content, directory="files")
+
+    def to_file(self, filename, menu_index=None):
+        if self.body is not None and filename is not None:
+            content = self.get_content()
+
+            if menu_index is not None:
+                html = '<html><head><meta charset="UTF-8"></head><body>{}{}<body></html>'.format(
+                    menu_index, content)
+            else:
+                html = '<html><head><meta charset="UTF-8"></head><body>{}<body></html>'.format(
+                    content)
+
+            self.write(filename, html)
+
 
 class Summary(CollectionSection):
     def __init__(self, page, filename=None, id_=None, menu_name=None):
         super(Summary, self).__init__(page, filename=filename,
-                id_="summary", menu_name="")
+                id_="summary", menu_name="summary")
 
 
 class EngineeringConnection(CollectionSection):
     def __init__(self, page, filename=None, id_=None, menu_name=None):
         self.body = page.find_all(lambda tag: tag.name=="section" and tag.findChildren("h3", class_="text-highlight"))
+        self.title = None
         
     def get_content(self):
         for s in self.body:
@@ -191,13 +311,82 @@ class EngineeringConnection(CollectionSection):
 class LearningObjetives(CollectionSection):
     def __init__(self, page, filename=None, id_=None, menu_name=None):
         super(LearningObjetives, self).__init__(page, filename=filename,
-                id_="objectives", menu_name="")
+                id_="objectives", menu_name="learning_objectives")
 
 
 class MoreLikeThis(CollectionSection):
     def __init__(self, page, filename=None, id_=None, menu_name=None):
         super(MoreLikeThis, self).__init__(page, filename=filename,
-                id_="morelikethis", menu_name="")
+                id_="morelikethis", menu_name="more_like_this")
+
+
+class MaterialsList(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(MaterialsList, self).__init__(page, filename=filename,
+                id_="mats", menu_name="materials_list")
+
+
+class Introduction(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(Introduction, self).__init__(page, filename=filename,
+                id_="intro", menu_name="introduction_motivation")
+
+
+class Procedure(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(Procedure, self).__init__(page, filename=filename,
+                id_="procedure", menu_name="procedure")
+
+
+class Attachments(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(Attachments, self).__init__(page, filename=filename,
+                id_="attachments", menu_name="attachments")
+
+
+class Troubleshooting(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(Troubleshooting, self).__init__(page, filename=filename,
+                id_="troubleshooting", menu_name="troubleshooting_tips")
+
+
+class Assessment(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(Assessment, self).__init__(page, filename=filename,
+                id_="assessment", menu_name="assessment")
+
+
+class ActivityExtensions(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(ActivityExtensions, self).__init__(page, filename=filename,
+                id_="extensions", menu_name="activity_extensions")
+
+
+class References(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        super(References, self).__init__(page, filename=filename,
+                id_="references", menu_name="references")
+
+
+class Contributors(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        pass
+
+
+class Acknowledgements(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        pass
+
+
+class CopyRight(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, menu_name=None):
+        pass
+
+
+def if_file_exists(filepath):
+    file_ = Path(filepath)
+    return file_.is_file()
+
 
 
 # CLI: This code will run when `souschef.py` is called on the command line
