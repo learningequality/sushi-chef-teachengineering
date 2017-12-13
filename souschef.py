@@ -188,14 +188,14 @@ class Collection(object):
         self.menu = Menu(self.page, filename=filepath, id_="CurriculumNav")
         self.source_id = source_id
         self.sections = [
-            Summary,
-            #EngineeringConnection,
+            [Summary,
+            EngineeringConnection],
             LearningObjetives,
             MoreLikeThis,
             MaterialsList,
             Introduction,
             Procedure,
-            Attachments,
+            #Attachments,
             Troubleshooting,
             Assessment,
             ActivityExtensions,
@@ -211,36 +211,42 @@ class Collection(object):
         LOGGER.info(" + Curriculum:"+ self.title)
         self.menu.to_file()
         for Section in self.sections:
-            section = Section(self.page, filename=self.menu.filename)
+            if isinstance(Section, list):
+                section = sum([section(self.page, filename=self.menu.filename) 
+                                for section in Section])
+            else:
+                section = Section(self.page, filename=self.menu.filename)
             menu_filename = self.menu.get(section.menu_name)
             menu_index = self.menu.to_html(directory="", active_li=menu_filename)
             section.to_file(menu_filename, menu_index=menu_index)
 
+        cr = Copyright(self.page)
         metadata_dict = {"description": "",
             "language": "en",
             "license": licenses.CC_BY,
-            "copyright_holder": "National Endowment for the Humanities",
+            "copyright_holder": cr.get_copyright_info(),
             "author": "",
             "source_id": self.source_id}
 
         levels.append(self.title.replace("/", "-"))
         PATH.set(*levels)
         writer.add_file(str(PATH), "Curriculum", self.menu.filename, **metadata_dict)
-        #writer.add_folder(str(PATH), "RESOURCES", **metadata_dict)
-        #PATH.set(*(levels+["RESOURCES"]))
-        #for name, pdf_url in self.resources.get_pdfs():
-        #    meta = metadata_dict.copy()
-        #    meta["source_id"] = pdf_url
-        #    try:
-        #        writer.add_file(str(PATH), name.replace(".pdf", ""), pdf_url, **meta)
-        #    except requests.exceptions.HTTPError as e:
-        #        LOGGER.info("Error: {}".format(e))
+        attachments = Attachments(self.page)
+        writer.add_folder(str(PATH), "Attachments", **metadata_dict)
+        PATH.set(*(levels+["Attachments"]))
+        for name, pdf_url in attachments.get_pdfs():
+            meta = metadata_dict.copy()
+            meta["source_id"] = pdf_url
+            try:
+                writer.add_file(str(PATH), name.replace(".pdf", ""), pdf_url, **meta)
+            except requests.exceptions.HTTPError as e:
+                LOGGER.info("Error: {}".format(e))
         if if_file_exists(self.menu.filename):
             #writer.add_file(str(PATH), "MEDIA", self.resources.filename, **metadata_dict)
             self.rm(self.menu.filename)
-        #resource.student_resources() external web page
+        
         PATH.go_to_parent_folder()
-        #PATH.go_to_parent_folder()
+        PATH.go_to_parent_folder()
 
     def rm(self, filepath):
         os.remove(filepath)
@@ -250,7 +256,11 @@ class CollectionSection(object):
     def __init__(self,  page, filename=None, id_=None, menu_name=None):
         LOGGER.debug(id_)
         self.id = id_
-        self.body = page.find("section", id=id_)
+        if id_ is not None:
+            self.body = page.find("section", id=id_)
+        else:
+            self.body = None
+
         if self.body is not None:
             h3 = self.body.find("h3")
             self.title = self.clean_title(h3)
@@ -260,6 +270,22 @@ class CollectionSection(object):
         self.filename = filename
         self.menu_name = menu_name
 
+    def __add__(self, o):
+        from bs4 import Tag
+        
+        if isinstance(self.body, Tag) and isinstance(o.body, Tag):
+            parent = Tag(name="div")
+            parent.insert(0, self.body)
+            parent.insert(1, o.body)
+            self.body = parent
+        else:
+            LOGGIN.info("Not merged sections: " + self + " and "+ o)
+
+        return self
+
+    def __radd__(self, o):
+        return self
+
     def clean_title(self, title):
         if title is not None:
             title = str(title)
@@ -267,7 +293,7 @@ class CollectionSection(object):
 
     def get_content(self):
         content = self.body
-        #remove_links(content)
+        remove_links(content)
         return "".join([str(p) for p in content])
 
     def write(self, filename, content):
@@ -275,6 +301,7 @@ class CollectionSection(object):
             zipper.write_contents(filename, content, directory="files")
 
     def to_file(self, filename, menu_index=None):
+        #print(self.__class__.__name__, filename)
         if self.body is not None and filename is not None:
             content = self.get_content()
 
@@ -296,16 +323,10 @@ class Summary(CollectionSection):
 
 class EngineeringConnection(CollectionSection):
     def __init__(self, page, filename=None, id_=None, menu_name=None):
-        self.body = page.find_all(lambda tag: tag.name=="section" and tag.findChildren("h3", class_="text-highlight"))
-        self.title = None
-        
-    def get_content(self):
-        for s in self.body:
-            h3 = s.find("h3", class_="text-highlight")
-            if h3.text.strip() == "Engineering Connection":
-                self.title = h3.text.strip()
-                print("OK", s.find_all("p"))
-                break
+        super(EngineeringConnection, self).__init__(page, filename=filename,
+                id_=id_, menu_name="summary")
+        self.body = page.find(lambda tag: tag.name=="section" and\
+            tag.findChildren("h3", text=re.compile("\s*Engineering Connection\s*")))
 
 
 class LearningObjetives(CollectionSection):
@@ -343,6 +364,13 @@ class Attachments(CollectionSection):
         super(Attachments, self).__init__(page, filename=filename,
                 id_="attachments", menu_name="attachments")
 
+    def get_pdfs(self):
+        resource_links = self.body.find_all("a", href=re.compile("^\/|https\:\/\/www.teachengineering"))
+        for link in resource_links:
+            if link["href"].endswith(".pdf"):
+                name = get_name_from_url(link["href"])
+                yield name, urljoin(BASE_URL, link["href"])
+
 
 class Troubleshooting(CollectionSection):
     def __init__(self, page, filename=None, id_=None, menu_name=None):
@@ -378,15 +406,40 @@ class Acknowledgements(CollectionSection):
         pass
 
 
-class CopyRight(CollectionSection):
+class Copyright(CollectionSection):
     def __init__(self, page, filename=None, id_=None, menu_name=None):
-        pass
+        self.body = page.find(lambda tag: tag.name=="section" and\
+            tag.findChildren("h3", text=re.compile("\s*Copyright\s*")))
+
+    def get_copyright_info(self):
+        text = self.body.text
+        index = text.find("©")
+        if index != -1:
+            copyright = text[index:].strip()
+            LOGGER.info("   - COPYRIGHT INFO:" + copyright)
+        else:
+            copyright = ""
+        return copyright
 
 
 def if_file_exists(filepath):
     file_ = Path(filepath)
     return file_.is_file()
 
+
+def get_name_from_url(url):
+    return os.path.basename(urlparse(url).path)
+
+
+def get_name_from_url_no_ext(url):
+    path = get_name_from_url(url)
+    return ".".join(path.split(".")[:-1])
+
+
+def remove_links(content):
+    if content is not None:
+        for link in content.find_all("a"):
+            link.replaceWithChildren()
 
 
 # CLI: This code will run when `souschef.py` is called on the command line
