@@ -66,7 +66,10 @@ def scrape_source(writer):
     #resource_browser.run()
     #url = "https://www.teachengineering.org/activities/view/cub_human_lesson06_activity1"
     #url = "https://www.teachengineering.org/lessons/view/van_mri_lesson_7"
-    url = "https://www.teachengineering.org/activities/view/wpi_amusement_park_ride"
+    #url = "https://www.teachengineering.org/activities/view/wpi_amusement_park_ride"
+    #url = "https://www.teachengineering.org/curricularunits/view/duk_bycatchunit_musc_unit"
+    #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
+    url = "https://www.teachengineering.org/sprinkles/view/cub_towerinvestigation_sprinkle"
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
@@ -207,19 +210,24 @@ class Collection(object):
         self.menu.add("Contributors")
         self.source_id = source_id
         self.sections = [
-            [Summary, EngineeringConnection],
+            [CurriculumHeader, Summary, EngineeringConnection], #lesson, activity
+            Introduction, #sprinkle
+            Supplies, #sprinkle
+            WrapUp, #sprinkle
+            UnitOverview, #unit
+            UnitSchedule, #unit
             LearningObjetives,
-            MoreLikeThis,
+            MoreLikeThis, #all
             MaterialsList,
-            Introduction,
+            IntroductionMotivation,
             Background,
             Vocabulary,
-            Procedure,
+            Procedure, #all
             InvestigatingQuestions,
             Troubleshooting,
             Assessment,
-            ActivityExtensions,
-            ActivityScaling,
+            ActivityExtensions, #unit
+            ActivityScaling, #unit
             References,
             [Contributors, SupportingProgram, Acknowledgements, Copyright]
         ]
@@ -283,10 +291,7 @@ class CollectionSection(object):
     def __init__(self,  page, filename=None, id_=None, menu_name=None):
         LOGGER.debug(id_)
         self.id = id_
-        if id_ is not None:
-            self.body = page.find("section", id=id_)
-        else:
-            self.body = None
+        self.body = page.find("section", id=id_)
 
         if self.body is not None:
             h3 = self.body.find("h3")
@@ -306,7 +311,8 @@ class CollectionSection(object):
             parent.insert(1, o.body)
             self.body = parent
         else:
-            LOGGER.info("Not merged sections: " + self + " and "+ o)
+            LOGGER.info("Can't merge sections: {} and {}".format(
+                self.__class__.__name__, o.__class__.__name__))
 
         return self
 
@@ -356,6 +362,14 @@ class CollectionSection(object):
             self.write(filename, html)
 
 
+class CurriculumHeader(CollectionSection):
+    def __init__(self, page, filename=None):
+        self.body = page.find("div", class_="curriculum-header")
+        self.filename = filename
+        self.menu_name = "summary"
+        self.id = "curriculum-header"
+
+
 class Summary(CollectionSection):
     def __init__(self, page, filename=None):
         super(Summary, self).__init__(page, filename=filename,
@@ -388,10 +402,16 @@ class MaterialsList(CollectionSection):
                 id_="mats", menu_name="materials_list")
 
 
+class IntroductionMotivation(CollectionSection):
+    def __init__(self, page, filename=None):
+        super(IntroductionMotivation, self).__init__(page, filename=filename,
+                id_="intro", menu_name="introduction_motivation")
+
+
 class Introduction(CollectionSection):
     def __init__(self, page, filename=None):
         super(Introduction, self).__init__(page, filename=filename,
-                id_="intro", menu_name="introduction_motivation")
+                id_="intro", menu_name="introduction")
 
 
 class Procedure(CollectionSection):
@@ -406,11 +426,12 @@ class Attachments(CollectionSection):
                 id_="attachments", menu_name="attachments")
 
     def get_pdfs(self):
-        resource_links = self.body.find_all("a", href=re.compile("^\/|https\:\/\/www.teachengineering"))
-        for link in resource_links:
-            if link["href"].endswith(".pdf"):
-                name = get_name_from_url(link["href"])
-                yield name, urljoin(BASE_URL, link["href"])
+        if self.body is not None:
+            resource_links = self.body.find_all("a", href=re.compile("^\/|https\:\/\/www.teachengineering"))
+            for link in resource_links:
+                if link["href"].endswith(".pdf"):
+                    name = get_name_from_url(link["href"])
+                    yield name, urljoin(BASE_URL, link["href"])
 
 
 class Troubleshooting(CollectionSection):
@@ -501,6 +522,30 @@ class ActivityScaling(CollectionSection):
     def __init__(self, page, filename=None):
         super(ActivityScaling, self).__init__(page, filename=filename,
                 id_="scaling", menu_name="activity_scaling")
+
+
+class UnitOverview(CollectionSection):
+    def __init__(self, page, filename=None):
+        super(UnitOverview, self).__init__(page, filename=filename,
+                id_="overview", menu_name="unit_overview")
+
+
+class UnitSchedule(CollectionSection):
+    def __init__(self, page, filename=None):
+        super(UnitSchedule, self).__init__(page, filename=filename,
+                id_="schedule", menu_name="unit_schedule")
+
+
+class Supplies(CollectionSection):
+    def __init__(self, page, filename=None):
+        super(Supplies, self).__init__(page, filename=filename,
+                id_="sups", menu_name="supplies")
+
+
+class WrapUp(CollectionSection):
+    def __init__(self, page, filename=None):
+        super(WrapUp, self).__init__(page, filename=filename,
+                id_="wrapup", menu_name="wrap_up_-_thought_questions")
 
 
 def if_file_exists(filepath):
