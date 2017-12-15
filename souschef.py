@@ -76,6 +76,7 @@ def test():
     #url = "https://www.teachengineering.org/sprinkles/view/cub_towerinvestigation_sprinkle"
     #url = "https://www.teachengineering.org/makerchallenges/view/cub_carrierdevices_maker1"
     url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
+    #"https://www.teachengineering.org/lessons/view/cub_surg_lesson01" video
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
@@ -224,17 +225,20 @@ class Activity(CurriculumType):
     def __init__(self):
         self.sections = [
             {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "mats", "class": CollectionSection, "menu_name": "materials_list"},
             {"id": "intro", "class": CollectionSection, "menu_name": "introduction_motivation"},
             {"id": "vocab", "class": CollectionSection, "menu_name": "vocabulary_definitions"},
             {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
+            {"id": "safety", "class": CollectionSection, "menu_name": "safety_issues"},
             {"id": "quest", "class": CollectionSection, "menu_name": "investigating_questions"},
             {"id": "troubleshooting", "class": CollectionSection, "menu_name": "troubleshooting_tips"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
             {"id": "scaling", "class": CollectionSection, "menu_name": "activity_scaling"},
             {"id": "extensions", "class": CollectionSection, "menu_name": "activity_extensions"},
+            {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
             {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
             "menu_name": "acknowledgements"},
@@ -253,6 +257,7 @@ class Lesson(CurriculumType):
             {"id": "assoc", "class": CollectionSection, "menu_name": "associated_activities"},
             {"id": "closure", "class": CollectionSection, "menu_name": "lesson_closure"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "extensions", "class": CollectionSection, "menu_name": "extensions"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
             {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
