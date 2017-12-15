@@ -62,23 +62,30 @@ def scrape_source(writer):
     """
     CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
     LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
-    #resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
-    #resource_browser.run()
+    resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
+    resource_browser.run()
+    #test()
+   
+
+def test():
     #url = "https://www.teachengineering.org/activities/view/cub_human_lesson06_activity1"
     #url = "https://www.teachengineering.org/lessons/view/van_mri_lesson_7"
     #url = "https://www.teachengineering.org/activities/view/wpi_amusement_park_ride"
     #url = "https://www.teachengineering.org/curricularunits/view/duk_bycatchunit_musc_unit"
     #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
-    url = "https://www.teachengineering.org/sprinkles/view/cub_towerinvestigation_sprinkle"
+    #url = "https://www.teachengineering.org/sprinkles/view/cub_towerinvestigation_sprinkle"
+    #url = "https://www.teachengineering.org/makerchallenges/view/cub_carrierdevices_maker1"
+    url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
         page = BeautifulSoup(document, 'html.parser')
         collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip", 
-            source_id=url)
+            source_id=url,
+            type="Lessons")
         collection.to_file(PATH, ["activities"])
     except requests.exceptions.HTTPError as e:
-        LOGGER.info("Error: {}".format(e))
+        LOGGER.info("Error: {}".format(e)) 
 
 
 class ResourceBrowser(object):
@@ -111,33 +118,33 @@ class ResourceBrowser(object):
                 pass
         return azureSearchSettings
 
-    def build_resource_url(self, azureSearchSettings, offset=0):
+    def json_browser_url(self, azureSearchSettings, offset=0):
         return "https://{serviceName}.search.windows.net/indexes/{indexName}/docs?api-version={apiVersion}&api-key={apiKey}&search=&%24count=true&%24top=10&%24skip={offset}&searchMode=all&scoringProfile=FieldBoost&%24orderby=sortableTitle".format(offset=offset, **azureSearchSettings)
 
     def run(self):
         settings = self.get_resource_data()
         offset = 0
         while True:
-            url = self.build_resource_url(settings, offset=offset)
+            url = self.json_browser_url(settings, offset=offset)
             req = requests.get(url)
             data = req.json()
             #num_registers = data["@odata.count"]
             for resource in data["value"]:
                 url = self.build_resource_url(resource["id"], resource["collection"])
                 try:
-                    document = downloader.read(self.resource_url, loadjs=False)#, session=sess)
+                    document = downloader.read(url, loadjs=False)#, session=sess)
                     page = BeautifulSoup(document, 'html.parser')
                 except requests.exceptions.HTTPError as e:
                     LOGGER.info("Error: {}".format(e))
                 else:
                     collection = Collection(page, filepath="/tmp/"+resource["id"]+".zip", 
-                        source_id=url)
+                        source_id=url,
+                        type=resource["collection"])
                     collection.to_file(PATH, [resource["collection"]])
-                    time.sleep(1)
-                break
+                    time.sleep(.2)
             return
 
-    def build_resource_url(id_name, collection):
+    def build_resource_url(self, id_name, collection):
         return urljoin(BASE_URL, collection.lower()+"/view/"+id_name)
 
 
@@ -199,38 +206,125 @@ class Menu(object):
                 raise Exception
 
 
+class CurriculumType(object):
+     def render(self, page, menu_filename):
+        for meta_section in self.sections:
+            Section = meta_section["class"]
+            if isinstance(Section, list):
+                section = sum([subsection(page, filename=menu_filename, 
+                                id_=meta_section["id"], menu_name=meta_section["menu_name"])
+                                for subsection in Section])
+            else:
+                section = Section(page, filename=menu_filename, 
+                                    id_=meta_section["id"], menu_name=meta_section["menu_name"])
+            yield section
+
+
+class Activity(CurriculumType):
+    def __init__(self):
+        self.sections = [
+            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
+            {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
+            {"id": "mats", "class": CollectionSection, "menu_name": "materials_list"},
+            {"id": "intro", "class": CollectionSection, "menu_name": "introduction_motivation"},
+            {"id": "vocab", "class": CollectionSection, "menu_name": "vocabulary_definitions"},
+            {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
+            {"id": "quest", "class": CollectionSection, "menu_name": "investigating_questions"},
+            {"id": "troubleshooting", "class": CollectionSection, "menu_name": "troubleshooting_tips"},
+            {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "scaling", "class": CollectionSection, "menu_name": "activity_scaling"},
+            {"id": "extensions", "class": CollectionSection, "menu_name": "activity_extensions"},
+            {"id": "references", "class": CollectionSection, "menu_name": "references"},
+            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
+            "menu_name": "acknowledgements"},
+        ]
+
+
+class Lesson(CurriculumType):
+    def __init__(self):
+        self.sections = [
+            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
+            {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
+            {"id": "intro", "class": CollectionSection, "menu_name": "introduction_motivation"},
+            {"id": "background", "class": CollectionSection, "menu_name": "background"},
+            {"id": "vocab", "class": CollectionSection, "menu_name": "vocabulary_definitions"},
+            {"id": "assoc", "class": CollectionSection, "menu_name": "associated_activities"},
+            {"id": "closure", "class": CollectionSection, "menu_name": "lesson_closure"},
+            {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "extensions", "class": CollectionSection, "menu_name": "extensions"},
+            {"id": "references", "class": CollectionSection, "menu_name": "references"},
+            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
+            "menu_name": "acknowledgements"},
+        ]
+
+
+class CurricularUnit(CurriculumType):
+    def __init__(self):
+        self.sections = [
+            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
+            {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
+            {"id": "schedule", "class": CollectionSection, "menu_name": "unit_schedule"},
+            {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
+            "menu_name": "acknowledgements"},
+        ]
+#    ActivityExtensions, #unit
+        #    ActivityScaling, #unit
+
+class Sprinkle(CurriculumType):
+    def __init__(self):
+        self.sections = [
+            {"id": "intro", "class": [CurriculumHeader, CollectionSection], "menu_name": "introduction"},
+            {"id": "supplies", "class": CollectionSection, "menu_name": "supplies"},
+            {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
+            {"id": "wrapup", "class": CollectionSection, "menu_name": "wrap_up_-_thought_questions"},
+            {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
+            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
+            "menu_name": "acknowledgements"},
+        ]
+
+
+class MakerChallenge(CurriculumType):
+    def __init__(self):
+        self.sections = [
+            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "maker_challenge_recap"},
+            {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
+            {"id": "mats", "class": CollectionSection, "menu_name": "maker_materials_&_supplies"},
+            {"id": "kickoff", "class": CollectionSection, "menu_name": "kickoff"},
+            {"id": "resources", "class": CollectionSection, "menu_name": "resources"},
+            {"id": "makertime", "class": CollectionSection, "menu_name": "maker_time"},
+            {"id": "wrapup", "class": CollectionSection, "menu_name": "wrap_up"},
+            {"id": "tips", "class": CollectionSection, "menu_name": "tips"},
+            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
+            "menu_name": "acknowledgements"},
+        ]
+
+
 class Collection(object):
-    def __init__(self, page, filepath, source_id):
+    def __init__(self, page, filepath, source_id, type):
         self.page = page
         self.title_prefix = self.clean_title(self.page.find("span", class_="title-prefix"))
         self.title = self.clean_title(self.page.find("span", class_="curriculum-title"))
         self.contribution_by = None
         self.menu = Menu(self.page, filename=filepath, id_="CurriculumNav", 
             exclude_titles=["attachments", "comments"])
-        self.menu.add("Contributors")
         self.source_id = source_id
-        self.sections = [
-            [CurriculumHeader, Summary, EngineeringConnection], #lesson, activity
-            Introduction, #sprinkle
-            Supplies, #sprinkle
-            WrapUp, #sprinkle
-            UnitOverview, #unit
-            UnitSchedule, #unit
-            LearningObjetives,
-            MoreLikeThis, #all
-            MaterialsList,
-            IntroductionMotivation,
-            Background,
-            Vocabulary,
-            Procedure, #all
-            InvestigatingQuestions,
-            Troubleshooting,
-            Assessment,
-            ActivityExtensions, #unit
-            ActivityScaling, #unit
-            References,
-            [Contributors, SupportingProgram, Acknowledgements, Copyright]
-        ]
+        LOGGER.info(" * Type:" + type)
+        if type == "Maker Challenge":
+            self.curriculum_type = MakerChallenge()
+        elif type == "Lessons":
+            self.curriculum_type = Lesson()
+        elif type == "Activities":
+            self.curriculum_type = Activity()
+        elif type == "Curricular Unit":
+            self.curriculum_type = CurricularUnit()
+        elif type == "Sprinkle":
+            self.curriculum_type = Sprinkle()
 
     def clean_title(self, title):
         if title is not None:
@@ -241,15 +335,10 @@ class Collection(object):
         LOGGER.info(" + Curriculum:"+ self.title)
         self.menu.to_file()
         copy_page = copy.copy(self.page)
-        for Section in self.sections:
-            if isinstance(Section, list):
-                section = sum([section(self.page, filename=self.menu.filename) 
-                                for section in Section])
-            else:
-                section = Section(self.page, filename=self.menu.filename)
+        for section in self.curriculum_type.render(self.page, self.menu.filename):
             menu_filename = self.menu.get(section.menu_name)
             if menu_filename is not None:
-                print(section.id, section.__class__.__name__)
+                #print(section.id, section.__class__.__name__, section.menu_name)
                 self.menu.set_section(section.menu_name, section.id)
             menu_index = self.menu.to_html(directory="", active_li=menu_filename)
             section.to_file(menu_filename, menu_index=menu_index)
@@ -363,67 +452,32 @@ class CollectionSection(object):
 
 
 class CurriculumHeader(CollectionSection):
-    def __init__(self, page, filename=None):
+    def __init__(self, page, filename=None, id_="curriculum-header", menu_name="summary"):
         self.body = page.find("div", class_="curriculum-header")
         self.filename = filename
-        self.menu_name = "summary"
-        self.id = "curriculum-header"
-
-
-class Summary(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(Summary, self).__init__(page, filename=filename,
-                id_="summary", menu_name="summary")
+        self.menu_name = menu_name
+        self.id = id_
 
 
 class EngineeringConnection(CollectionSection):
-    def __init__(self, page, filename=None):
+    def __init__(self, page, filename=None, id_="engineering_connection", 
+                menu_name="engineering_connection"):
         super(EngineeringConnection, self).__init__(page, filename=filename,
-                id_="engineering_connection", menu_name="engineering_connection")
+                id_=id_, menu_name=menu_name)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Engineering Connection\s*")))
 
 
-class LearningObjetives(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(LearningObjetives, self).__init__(page, filename=filename,
-                id_="objectives", menu_name="learning_objectives")
-
-
-class MoreLikeThis(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(MoreLikeThis, self).__init__(page, filename=filename,
-                id_="morelikethis", menu_name="more_like_this")
-
-
-class MaterialsList(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(MaterialsList, self).__init__(page, filename=filename,
-                id_="mats", menu_name="materials_list")
-
-
-class IntroductionMotivation(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(IntroductionMotivation, self).__init__(page, filename=filename,
-                id_="intro", menu_name="introduction_motivation")
-
-
-class Introduction(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(Introduction, self).__init__(page, filename=filename,
-                id_="intro", menu_name="introduction")
-
-
-class Procedure(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(Procedure, self).__init__(page, filename=filename,
-                id_="procedure", menu_name="procedure")
+class AssociatedActivities(CollectionSection):
+    def __init__(self, page, filename=None, id_="assoc", menu_name="associated_activities"):
+        super(AssociatedActivities, self).__init__(page, filename=filename,
+                id_=id_, menu_name=menu_name)
 
 
 class Attachments(CollectionSection):
-    def __init__(self, page, filename=None):
+    def __init__(self, page, filename=None, id_="attachments", menu_name="attachments"):
         super(Attachments, self).__init__(page, filename=filename,
-                id_="attachments", menu_name="attachments")
+                id_=id_, menu_name=menu_name)
 
     def get_pdfs(self):
         if self.body is not None:
@@ -434,58 +488,34 @@ class Attachments(CollectionSection):
                     yield name, urljoin(BASE_URL, link["href"])
 
 
-class Troubleshooting(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(Troubleshooting, self).__init__(page, filename=filename,
-                id_="troubleshooting", menu_name="troubleshooting_tips")
-
-
-class Assessment(CollectionSection):
-    def __init__(self, page, filename=None, id_=None, menu_name=None):
-        super(Assessment, self).__init__(page, filename=filename,
-                id_="assessment", menu_name="assessment")
-
-
-class ActivityExtensions(CollectionSection):
-    def __init__(self, page, filename=None, id_=None, menu_name=None):
-        super(ActivityExtensions, self).__init__(page, filename=filename,
-                id_="extensions", menu_name="activity_extensions")
-
-
-class References(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(References, self).__init__(page, filename=filename,
-                id_="references", menu_name="references")
-
-
 class Contributors(CollectionSection):
-    def __init__(self, page, filename=None):
+    def __init__(self, page, filename=None, id_="contributors", menu_name="contributors"):
         super(Contributors, self).__init__(page, filename=filename,
-                id_="contributors", menu_name="contributors")
+                id_=id_, menu_name=menu_name)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Contributors\s*")))
 
 
 class SupportingProgram(CollectionSection):
-    def __init__(self, page, filename=None):
+    def __init__(self, page, filename=None, id_="supporting_program", menu_name="supporting_program"):
         super(SupportingProgram, self).__init__(page, filename=filename,
-                id_="supporting_program", menu_name="supporting_program")
+                id_=id_, menu_name=menu_name)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Supporting Program\s*")))
 
 
 class Acknowledgements(CollectionSection):
-    def __init__(self, page, filename=None):
+    def __init__(self, page, filename=None, id_="acknowledgements", menu_name="acknowledgements"):
         super(Acknowledgements, self).__init__(page, filename=filename,
-                id_="acknowledgements", menu_name="acknowledgements")
+                id_=id_, menu_name=menu_name)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Acknowledgements\s*")))
 
 
 class Copyright(CollectionSection):
-    def __init__(self, page, filename=None):
+    def __init__(self, page, filename=None, id_="copyright", menu_name="copyright"):
         super(Copyright, self).__init__(page, filename=filename,
-                id_="copyright", menu_name="copyright")
+                id_=id_, menu_name=menu_name)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Copyright\s*")))
 
@@ -498,54 +528,6 @@ class Copyright(CollectionSection):
         else:
             copyright = ""
         return copyright
-
-
-class Background(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(Background, self).__init__(page, filename=filename,
-                id_="background", menu_name="background")
-
-
-class Vocabulary(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(Vocabulary, self).__init__(page, filename=filename,
-                id_="vocab", menu_name="vocabulary_definitions")
-
-
-class InvestigatingQuestions(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(InvestigatingQuestions, self).__init__(page, filename=filename,
-                id_="quest", menu_name="investigating_questions")
-
-
-class ActivityScaling(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(ActivityScaling, self).__init__(page, filename=filename,
-                id_="scaling", menu_name="activity_scaling")
-
-
-class UnitOverview(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(UnitOverview, self).__init__(page, filename=filename,
-                id_="overview", menu_name="unit_overview")
-
-
-class UnitSchedule(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(UnitSchedule, self).__init__(page, filename=filename,
-                id_="schedule", menu_name="unit_schedule")
-
-
-class Supplies(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(Supplies, self).__init__(page, filename=filename,
-                id_="sups", menu_name="supplies")
-
-
-class WrapUp(CollectionSection):
-    def __init__(self, page, filename=None):
-        super(WrapUp, self).__init__(page, filename=filename,
-                id_="wrapup", menu_name="wrap_up_-_thought_questions")
 
 
 def if_file_exists(filepath):
