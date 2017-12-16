@@ -68,23 +68,18 @@ def scrape_source(writer):
    
 
 def test():
-    #url = "https://www.teachengineering.org/activities/view/cub_human_lesson06_activity1"
-    #url = "https://www.teachengineering.org/lessons/view/van_mri_lesson_7"
-    #url = "https://www.teachengineering.org/activities/view/wpi_amusement_park_ride"
-    #url = "https://www.teachengineering.org/curricularunits/view/duk_bycatchunit_musc_unit"
-    #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
-    #url = "https://www.teachengineering.org/sprinkles/view/cub_towerinvestigation_sprinkle"
-    #url = "https://www.teachengineering.org/makerchallenges/view/cub_carrierdevices_maker1"
-    url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
+    #url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
     #"https://www.teachengineering.org/lessons/view/cub_surg_lesson01" video
+    url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
+    collection_type = "Sprinkles"
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
         page = BeautifulSoup(document, 'html.parser')
         collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip", 
             source_id=url,
-            type="Lessons")
-        collection.to_file(PATH, ["activities"])
+            type=collection_type)
+        collection.to_file(PATH, [collection_type.lower()])
     except requests.exceptions.HTTPError as e:
         LOGGER.info("Error: {}".format(e)) 
 
@@ -124,7 +119,7 @@ class ResourceBrowser(object):
 
     def run(self):
         settings = self.get_resource_data()
-        offset = 0
+        offset = 10
         while True:
             url = self.json_browser_url(settings, offset=offset)
             req = requests.get(url)
@@ -143,7 +138,9 @@ class ResourceBrowser(object):
                         type=resource["collection"])
                     collection.to_file(PATH, [resource["collection"]])
                     time.sleep(.2)
-            return
+            offset += 10
+            if offset > 20:
+                return
 
     def build_resource_url(self, id_name, collection):
         return urljoin(BASE_URL, collection.lower()+"/view/"+id_name)
@@ -186,8 +183,12 @@ class Menu(object):
                 "section": None,
             }
 
-    def set_section(self, name, section):
-        self.menu[name]["section"] = section
+    def set_section(self, section):
+        menu_filename = self.get(section.menu_name)
+        if menu_filename is not None:
+            #print(section.id, section.__class__.__name__, section.menu_name)
+            self.menu[section.menu_name]["section"] = section.id
+        return menu_filename
 
     def to_html(self, directory="files/", active_li=None):
         li = []
@@ -213,7 +214,7 @@ class CurriculumType(object):
             Section = meta_section["class"]
             if isinstance(Section, list):
                 section = sum([subsection(page, filename=menu_filename, 
-                                id_=meta_section["id"], menu_name=meta_section["menu_name"])
+                                menu_name=meta_section["menu_name"])
                                 for subsection in Section])
             else:
                 section = Section(page, filename=menu_filename, 
@@ -224,7 +225,8 @@ class CurriculumType(object):
 class Activity(CurriculumType):
     def __init__(self):
         self.sections = [
-            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": "summary", "class": [CurriculumHeader, CollectionSection, EngineeringConnection], 
+            "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
@@ -240,8 +242,8 @@ class Activity(CurriculumType):
             {"id": "extensions", "class": CollectionSection, "menu_name": "activity_extensions"},
             {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
-            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
-            "menu_name": "acknowledgements"},
+            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            "menu_name": "info"},
         ]
 
 
@@ -249,6 +251,7 @@ class Lesson(CurriculumType):
     def __init__(self):
         self.sections = [
             {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "intro", "class": CollectionSection, "menu_name": "introduction_motivation"},
@@ -260,8 +263,8 @@ class Lesson(CurriculumType):
             {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "extensions", "class": CollectionSection, "menu_name": "extensions"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
-            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
-            "menu_name": "acknowledgements"},
+            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            "menu_name": "info"},
         ]
 
 
@@ -273,13 +276,12 @@ class CurricularUnit(CurriculumType):
             {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
             {"id": "schedule", "class": CollectionSection, "menu_name": "unit_schedule"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
-            {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
-            {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
-            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
-            "menu_name": "acknowledgements"},
+            #{"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            #{"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            "menu_name": "info"},
         ]
-#    ActivityExtensions, #unit
-        #    ActivityScaling, #unit
+
 
 class Sprinkle(CurriculumType):
     def __init__(self):
@@ -289,8 +291,8 @@ class Sprinkle(CurriculumType):
             {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
             {"id": "wrapup", "class": CollectionSection, "menu_name": "wrap_up_-_thought_questions"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
-            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
-            "menu_name": "acknowledgements"},
+            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            "menu_name": "info"},
         ]
 
 
@@ -305,8 +307,10 @@ class MakerChallenge(CurriculumType):
             {"id": "makertime", "class": CollectionSection, "menu_name": "maker_time"},
             {"id": "wrapup", "class": CollectionSection, "menu_name": "wrap_up"},
             {"id": "tips", "class": CollectionSection, "menu_name": "tips"},
-            {"id": "acknowledgements", "class": [Contributors, SupportingProgram, Acknowledgements, Copyright],
-            "menu_name": "acknowledgements"},
+            {"id": "other", "class": CollectionSection, "menu_name": "other"},
+            {"id": "acknowledgements", "class": CollectionSection, "menu_name": "acknowledgements"},
+            {"id": "", "class": [Contributors, Copyright, SupportingProgram],
+            "menu_name": "info"},
         ]
 
 
@@ -318,33 +322,32 @@ class Collection(object):
         self.contribution_by = None
         self.menu = Menu(self.page, filename=filepath, id_="CurriculumNav", 
             exclude_titles=["attachments", "comments"])
+        self.menu.add("Info")
         self.source_id = source_id
-        LOGGER.info(" * Type:" + type)
-        if type == "Maker Challenge":
+        self.type = type
+        if type == "MakerChallenges":
             self.curriculum_type = MakerChallenge()
         elif type == "Lessons":
             self.curriculum_type = Lesson()
         elif type == "Activities":
             self.curriculum_type = Activity()
-        elif type == "Curricular Unit":
+        elif type == "CurricularUnits":
             self.curriculum_type = CurricularUnit()
-        elif type == "Sprinkle":
+        elif type == "Sprinkles":
             self.curriculum_type = Sprinkle()
 
     def clean_title(self, title):
         if title is not None:
-            return title.text.strip()
-        return title
+            text = re.sub('\(|\)', '_', title.text)
+            return text.strip()
 
     def to_file(self, PATH, levels):
-        LOGGER.info(" + Curriculum:"+ self.title)
+        LOGGER.info(" + [{}]: {}".format(self.type, self.title))
+        LOGGER.info("   - URL: {}".format(self.source_id))
         self.menu.to_file()
         copy_page = copy.copy(self.page)
         for section in self.curriculum_type.render(self.page, self.menu.filename):
-            menu_filename = self.menu.get(section.menu_name)
-            if menu_filename is not None:
-                #print(section.id, section.__class__.__name__, section.menu_name)
-                self.menu.set_section(section.menu_name, section.id)
+            menu_filename = self.menu.set_section(section)
             menu_index = self.menu.to_html(directory="", active_li=menu_filename)
             section.to_file(menu_filename, menu_index=menu_index)
 
@@ -371,7 +374,6 @@ class Collection(object):
             except requests.exceptions.HTTPError as e:
                 LOGGER.info("Error: {}".format(e))
         if if_file_exists(self.menu.filename):
-            #writer.add_file(str(PATH), "MEDIA", self.resources.filename, **metadata_dict)
             self.rm(self.menu.filename)
         
         PATH.go_to_parent_folder()
@@ -404,8 +406,10 @@ class CollectionSection(object):
             parent.insert(0, self.body)
             parent.insert(1, o.body)
             self.body = parent
+        elif self.body is None and isinstance(o.body, Tag):
+            self.body = o.body
         else:
-            LOGGER.info("Can't merge sections: {} and {}".format(
+            LOGGER.info("Null sections: {} and {}".format(
                 self.__class__.__name__, o.__class__.__name__))
 
         return self
