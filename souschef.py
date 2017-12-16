@@ -12,6 +12,8 @@ import re
 import sys
 import time
 import copy
+import pafy
+import youtube_dl
 from urllib.error import URLError
 from urllib.parse import urlparse, urljoin
 
@@ -34,6 +36,15 @@ CHANNEL_THUMBNAIL = None                                    # Local path or url 
 PATH = path_builder.PathBuilder(channel_name=CHANNEL_NAME)  # Keeps track of path to write to csv
 WRITE_TO_PATH = "{}{}{}.zip".format(os.path.dirname(os.path.realpath(__file__)), os.path.sep, CHANNEL_NAME) # Where to generate zip file
 
+# webcache
+###############################################################
+sess = requests.Session()
+#cache = FileCache('.webcache')
+#basic_adapter = CacheControlAdapter(cache=cache)
+#forever_adapter = CacheControlAdapter(heuristic=CacheForeverHeuristic(), cache=cache)
+#sess.mount('http://', basic_adapter)
+#sess.mount(BASE_URL, forever_adapter)
+
 # Additional Constants
 ################################################################################
 LOGGER = logging.getLogger()
@@ -46,7 +57,7 @@ BASE_URL = "https://www.teachengineering.org"
 
 # If False then no download is made
 # for debugging proporses
-DOWNLOAD_VIDEOS = False
+DOWNLOAD_VIDEOS = True
 
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .2
@@ -63,15 +74,17 @@ def scrape_source(writer):
     CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
     LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
     resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
-    resource_browser.run()
-    #test()
+    #resource_browser.run()
+    test()
    
 
 def test():
     #url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
     #"https://www.teachengineering.org/lessons/view/cub_surg_lesson01" video
-    url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
-    collection_type = "Sprinkles"
+    #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
+    url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
+    #collection_type = "Sprinkles"
+    collection_type = "MakerChallenges"
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
@@ -225,7 +238,7 @@ class CurriculumType(object):
 class Activity(CurriculumType):
     def __init__(self):
         self.sections = [
-            {"id": "summary", "class": [CurriculumHeader, CollectionSection, EngineeringConnection], 
+            {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection], 
             "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
@@ -242,7 +255,7 @@ class Activity(CurriculumType):
             {"id": "extensions", "class": CollectionSection, "menu_name": "activity_extensions"},
             {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
-            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            {"id": None, "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
 
@@ -250,7 +263,7 @@ class Activity(CurriculumType):
 class Lesson(CurriculumType):
     def __init__(self):
         self.sections = [
-            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": None, "class": [CurriculumHeader, Summary], "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
@@ -263,7 +276,7 @@ class Lesson(CurriculumType):
             {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "extensions", "class": CollectionSection, "menu_name": "extensions"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
-            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            {"id": None, "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
 
@@ -271,14 +284,14 @@ class Lesson(CurriculumType):
 class CurricularUnit(CurriculumType):
     def __init__(self):
         self.sections = [
-            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "summary"},
+            {"id": None, "class": [CurriculumHeader, Summary], "menu_name": "summary"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
             {"id": "schedule", "class": CollectionSection, "menu_name": "unit_schedule"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
             #{"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
             #{"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
-            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            {"id": None, "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
 
@@ -286,12 +299,12 @@ class CurricularUnit(CurriculumType):
 class Sprinkle(CurriculumType):
     def __init__(self):
         self.sections = [
-            {"id": "intro", "class": [CurriculumHeader, CollectionSection], "menu_name": "introduction"},
+            {"id": None, "class": [CurriculumHeader, Introduction], "menu_name": "introduction"},
             {"id": "supplies", "class": CollectionSection, "menu_name": "supplies"},
             {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
             {"id": "wrapup", "class": CollectionSection, "menu_name": "wrap_up_-_thought_questions"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
-            {"id": "", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
+            {"id": None, "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
 
@@ -299,7 +312,7 @@ class Sprinkle(CurriculumType):
 class MakerChallenge(CurriculumType):
     def __init__(self):
         self.sections = [
-            {"id": "summary", "class": [CurriculumHeader, CollectionSection], "menu_name": "maker_challenge_recap"},
+            {"id": None, "class": [CurriculumHeader, Summary], "menu_name": "maker_challenge_recap"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "mats", "class": CollectionSection, "menu_name": "maker_materials_&_supplies"},
             {"id": "kickoff", "class": CollectionSection, "menu_name": "kickoff"},
@@ -309,7 +322,7 @@ class MakerChallenge(CurriculumType):
             {"id": "tips", "class": CollectionSection, "menu_name": "tips"},
             {"id": "other", "class": CollectionSection, "menu_name": "other"},
             {"id": "acknowledgements", "class": CollectionSection, "menu_name": "acknowledgements"},
-            {"id": "", "class": [Contributors, Copyright, SupportingProgram],
+            {"id": None, "class": [Contributors, Copyright, SupportingProgram],
             "menu_name": "info"},
         ]
 
@@ -346,10 +359,12 @@ class Collection(object):
         LOGGER.info("   - URL: {}".format(self.source_id))
         self.menu.to_file()
         copy_page = copy.copy(self.page)
+        resources = []
         for section in self.curriculum_type.render(self.page, self.menu.filename):
             menu_filename = self.menu.set_section(section)
             menu_index = self.menu.to_html(directory="", active_li=menu_filename)
             section.to_file(menu_filename, menu_index=menu_index)
+            resources = resources + section.resources
 
         self.menu.check()
         cr = Copyright(copy_page)
@@ -373,6 +388,18 @@ class Collection(object):
                 writer.add_file(str(PATH), name.replace(".pdf", ""), pdf_url, **meta)
             except requests.exceptions.HTTPError as e:
                 LOGGER.info("Error: {}".format(e))
+
+        if len(resources) > 0:
+            print("******", resources)
+            PATH.go_to_parent_folder()
+            PATH.set(*(levels+["VIDEOS"]))
+            for file_src, file_metadata in resources:
+                try:
+                    meta = file_metadata if len(file_metadata) > 0 else metadata_dict
+                    writer.add_file(str(PATH), get_name_from_url_no_ext(file_src), file_src, **meta)
+                except requests.exceptions.HTTPError as e:
+                    LOGGER.info("Error: {}".format(e))
+
         if if_file_exists(self.menu.filename):
             self.rm(self.menu.filename)
         
@@ -397,6 +424,7 @@ class CollectionSection(object):
             self.title = None
         self.filename = filename
         self.menu_name = menu_name
+        self.resources = []
 
     def __add__(self, o):
         from bs4 import Tag
@@ -425,6 +453,7 @@ class CollectionSection(object):
     def get_content(self):
         content = self.body
         self.get_imgs()
+        self.get_videos()
         remove_links(content)
         return "".join([str(p) for p in content])
 
@@ -437,6 +466,30 @@ class CollectionSection(object):
             filename = get_name_from_url(img_src)
             self.write_img(img_src, filename)
             img["src"] = filename
+
+    def get_videos(self):
+        urls = set([])
+        for iframe in self.body.find_all("iframe"):
+            url = iframe["src"]
+            if YouTubeResource.is_youtube(url):
+                urls.add(YouTubeResource.transform_embed(url))
+            iframe.extract()
+
+        for a in self.body.find_all("a"):
+            try:
+                resp = sess.head(a["href"], allow_redirects=True)
+                if YouTubeResource.is_youtube(resp.url):
+                    urls.add(resp.url)
+            except requests.exceptions.MissingSchema:
+                pass
+            except KeyError:
+                pass
+        #print(urls)
+        for i, url in enumerate(urls):
+            resource = YouTubeResource(url)
+            resource.to_file("", "")
+            if resource.resource_file is not None:
+                self.resources.append(resource.resource_file)
 
     def write(self, filename, content):
         with html_writer.HTMLWriter(self.filename, "a") as zipper:
@@ -451,10 +504,10 @@ class CollectionSection(object):
             content = self.get_content()
 
             if menu_index is not None:
-                html = '<html><head><meta charset="UTF-8"></head><body>{}{}<body></html>'.format(
+                html = '<html><head><meta charset="UTF-8"></head><body>{}{}</body></html>'.format(
                     menu_index, content)
             else:
-                html = '<html><head><meta charset="UTF-8"></head><body>{}<body></html>'.format(
+                html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
                     content)
 
             self.write(filename, html)
@@ -466,6 +519,7 @@ class CurriculumHeader(CollectionSection):
         self.filename = filename
         self.menu_name = menu_name
         self.id = id_
+        self.resources = []
 
 
 class EngineeringConnection(CollectionSection):
@@ -477,9 +531,15 @@ class EngineeringConnection(CollectionSection):
             tag.findChildren("h3", text=re.compile("\s*Engineering Connection\s*")))
 
 
-class AssociatedActivities(CollectionSection):
-    def __init__(self, page, filename=None, id_="assoc", menu_name="associated_activities"):
-        super(AssociatedActivities, self).__init__(page, filename=filename,
+class Summary(CollectionSection):
+    def __init__(self, page, filename=None, id_="summary", menu_name="summary"):
+        super(Summary, self).__init__(page, filename=filename,
+                id_=id_, menu_name=menu_name)
+
+
+class Introduction(CollectionSection):
+    def __init__(self, page, filename=None, id_="intro", menu_name="introduction"):
+        super(Introduction, self).__init__(page, filename=filename,
                 id_=id_, menu_name=menu_name)
 
 
@@ -537,6 +597,96 @@ class Copyright(CollectionSection):
         else:
             copyright = ""
         return copyright
+
+
+class ResourceType(object):
+    """
+        Base class for File, WebPage, Video, Audio resources
+    """
+    def __init__(self, type_name=None):
+        LOGGER.info("Resource Type: "+type_name)
+        self.type_name = type_name
+        self.resource_file = None
+
+    def to_file(self, description, filename):
+        pass
+
+    def add_resource_file(self, src, metadata, local=False):
+        if local is True:
+            self.resource_file = (src, metadata)
+        else:
+            self.resource_file = (urljoin(BASE_URL, src), metadata)
+
+
+class YouTubeResource(ResourceType):
+    def __init__(self, resource_url, type_name="Youtube"):
+        super(YouTubeResource, self).__init__(type_name=type_name)
+        self.resource_url = resource_url
+        self.file_format = file_formats.MP4
+
+    @classmethod
+    def is_youtube(self, url):
+        return url.find("youtube") != -1 or url.find("youtu.be") != -1
+
+    @classmethod
+    def transform_embed(self, url):
+        url = "".join(url.split("?")[:1])
+        return url.replace("embed/", "watch?v=")
+
+    def process_file(self, download=False):
+        ydl_options = {
+            #'outtmpl': '%(title)s-%(id)s.%(ext)s',
+            #'format': 'bestaudio/best',
+            'writethumbnail': False,
+            'no_warnings': True,
+            'continuedl': False,
+            'restrictfilenames':True,
+            'quiet': False,
+            'format': "bestvideo[height<={maxheight}][ext=mp4]+bestaudio[ext=m4a]/best[height<={maxheight}][ext=mp4]".format(maxheight='720'),
+        }
+
+        with youtube_dl.YoutubeDL(ydl_options) as ydl:
+            try:
+                ydl.add_default_info_extractors()
+                info = ydl.extract_info(self.resource_url, download=False)
+                if info["license"] == "Standard YouTube License" or info["license"] is None:
+                    if download is True:
+                        filepath = self.video_download()
+                    else:
+                        filepath = None
+
+                    if filepath is not None:
+                        self.add_resource_file(filepath, {}, local=True)
+                        return True
+            except(youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
+                    youtube_dl.utils.ExtractorError) as e:
+                LOGGER.info('error_occured ' + str(e))
+
+    #youtubedl has some troubles downloading videos in youtube,
+    #sometimes raises connection error
+    #for that I choose pafy for downloading
+    def video_download(self):
+        for try_number in range(10):
+            try:
+                video = pafy.new(self.resource_url)
+                best = video.getbest(preftype="mp4")
+                filepath = best.download(filepath="/tmp/")
+            except (URLError, ConnectionResetError) as e:
+                LOGGER.info(e)
+                LOGGER.info("Download retry:"+str(try_number))
+                time.sleep(.5)
+            else:
+                return filepath
+
+    def to_file(self, description, filepath):
+        metadata_dict = {"description": description,
+            "language": "en",
+            "license": licenses.CC_BY,
+            "copyright_holder": "",
+            "author": "",
+            "source_id": self.resource_url}
+        if self.process_file(download=DOWNLOAD_VIDEOS):
+            return metadata_dict
 
 
 def if_file_exists(filepath):
