@@ -57,7 +57,7 @@ BASE_URL = "https://www.teachengineering.org"
 
 # If False then no download is made
 # for debugging proporses
-DOWNLOAD_VIDEOS = True
+DOWNLOAD_VIDEOS = False
 
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .2
@@ -74,17 +74,18 @@ def scrape_source(writer):
     CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
     LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
     resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
-    #resource_browser.run()
-    test()
+    resource_browser.run()
+    #test()
    
 
 def test():
     #url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
-    #"https://www.teachengineering.org/lessons/view/cub_surg_lesson01" video
-    #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
-    url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
-    #collection_type = "Sprinkles"
-    collection_type = "MakerChallenges"
+    #url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson01" #video
+    url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
+    #url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
+    collection_type = "Sprinkles"
+    #collection_type = "MakerChallenges"
+    #collection_type = "Lessons"
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
@@ -132,7 +133,7 @@ class ResourceBrowser(object):
 
     def run(self):
         settings = self.get_resource_data()
-        offset = 10
+        offset = 20
         while True:
             url = self.json_browser_url(settings, offset=offset)
             req = requests.get(url)
@@ -152,7 +153,7 @@ class ResourceBrowser(object):
                     collection.to_file(PATH, [resource["collection"]])
                     time.sleep(.2)
             offset += 10
-            if offset > 20:
+            if offset > 60:
                 return
 
     def build_resource_url(self, id_name, collection):
@@ -199,7 +200,6 @@ class Menu(object):
     def set_section(self, section):
         menu_filename = self.get(section.menu_name)
         if menu_filename is not None:
-            #print(section.id, section.__class__.__name__, section.menu_name)
             self.menu[section.menu_name]["section"] = section.id
         return menu_filename
 
@@ -263,7 +263,7 @@ class Activity(CurriculumType):
 class Lesson(CurriculumType):
     def __init__(self):
         self.sections = [
-            {"id": None, "class": [CurriculumHeader, Summary], "menu_name": "summary"},
+            {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection], "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
@@ -300,7 +300,7 @@ class Sprinkle(CurriculumType):
     def __init__(self):
         self.sections = [
             {"id": None, "class": [CurriculumHeader, Introduction], "menu_name": "introduction"},
-            {"id": "supplies", "class": CollectionSection, "menu_name": "supplies"},
+            {"id": "sups", "class": CollectionSection, "menu_name": "supplies"},
             {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
             {"id": "wrapup", "class": CollectionSection, "menu_name": "wrap_up_-_thought_questions"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
@@ -349,6 +349,10 @@ class Collection(object):
         elif type == "Sprinkles":
             self.curriculum_type = Sprinkle()
 
+    def description(self):
+        descr = self.page.find("meta", property="og:description")
+        return descr["content"]
+
     def clean_title(self, title):
         if title is not None:
             text = re.sub('\(|\)', '_', title.text)
@@ -368,7 +372,7 @@ class Collection(object):
 
         self.menu.check()
         cr = Copyright(copy_page)
-        metadata_dict = {"description": "",
+        metadata_dict = {"description": self.description(),
             "language": "en",
             "license": licenses.CC_BY,
             "copyright_holder": cr.get_copyright_info(),
@@ -390,7 +394,6 @@ class Collection(object):
                 LOGGER.info("Error: {}".format(e))
 
         if len(resources) > 0:
-            print("******", resources)
             PATH.go_to_parent_folder()
             PATH.set(*(levels+["VIDEOS"]))
             for file_src, file_metadata in resources:
@@ -487,7 +490,7 @@ class CollectionSection(object):
         #print(urls)
         for i, url in enumerate(urls):
             resource = YouTubeResource(url)
-            resource.to_file("", "")
+            resource.to_file()
             if resource.resource_file is not None:
                 self.resources.append(resource.resource_file)
 
@@ -608,7 +611,7 @@ class ResourceType(object):
         self.type_name = type_name
         self.resource_file = None
 
-    def to_file(self, description, filename):
+    def to_file(self, filepath=None):
         pass
 
     def add_resource_file(self, src, metadata, local=False):
@@ -645,6 +648,13 @@ class YouTubeResource(ResourceType):
             'format': "bestvideo[height<={maxheight}][ext=mp4]+bestaudio[ext=m4a]/best[height<={maxheight}][ext=mp4]".format(maxheight='720'),
         }
 
+        metadata = {"description": "",
+            "language": "en",
+            "license": licenses.CC_BY,
+            "copyright_holder": "TeachEngineering",
+            "author": "",
+            "source_id": self.resource_url}
+
         with youtube_dl.YoutubeDL(ydl_options) as ydl:
             try:
                 ydl.add_default_info_extractors()
@@ -656,7 +666,7 @@ class YouTubeResource(ResourceType):
                         filepath = None
 
                     if filepath is not None:
-                        self.add_resource_file(filepath, {}, local=True)
+                        self.add_resource_file(filepath, metadata, local=True)
                         return True
             except(youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
                     youtube_dl.utils.ExtractorError) as e:
@@ -678,15 +688,8 @@ class YouTubeResource(ResourceType):
             else:
                 return filepath
 
-    def to_file(self, description, filepath):
-        metadata_dict = {"description": description,
-            "language": "en",
-            "license": licenses.CC_BY,
-            "copyright_holder": "",
-            "author": "",
-            "source_id": self.resource_url}
-        if self.process_file(download=DOWNLOAD_VIDEOS):
-            return metadata_dict
+    def to_file(self, filepath=None):
+        self.process_file(download=DOWNLOAD_VIDEOS)
 
 
 def if_file_exists(filepath):
