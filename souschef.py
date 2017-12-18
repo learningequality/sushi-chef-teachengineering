@@ -8,6 +8,7 @@ from collections import OrderedDict
 import logging
 import os
 from pathlib import Path
+from http import client
 import re
 import sys
 import time
@@ -57,7 +58,7 @@ BASE_URL = "https://www.teachengineering.org"
 
 # If False then no download is made
 # for debugging proporses
-DOWNLOAD_VIDEOS = False
+DOWNLOAD_VIDEOS = True
 
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .2
@@ -74,8 +75,8 @@ def scrape_source(writer):
     CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
     LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
     resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
-    resource_browser.run()
-    #test()
+    #resource_browser.run()
+    test()
    
 
 def test():
@@ -83,9 +84,11 @@ def test():
     #url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson01" #video
     url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
     #url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
-    collection_type = "Sprinkles"
+    #url = "https://www.teachengineering.org/activities/view/uoh_circuit_lesson01_activity1"
+    #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
     #collection_type = "Lessons"
+    collection_type = "Activities"
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
@@ -128,32 +131,44 @@ class ResourceBrowser(object):
                 pass
         return azureSearchSettings
 
-    def json_browser_url(self, azureSearchSettings, offset=0):
-        return "https://{serviceName}.search.windows.net/indexes/{indexName}/docs?api-version={apiVersion}&api-key={apiKey}&search=&%24count=true&%24top=10&%24skip={offset}&searchMode=all&scoringProfile=FieldBoost&%24orderby=sortableTitle".format(offset=offset, **azureSearchSettings)
+    def json_browser_url(self, azureSearchSettings, offset=0, batch=10):
+        return "https://{serviceName}.search.windows.net/indexes/{indexName}/docs?api-version={apiVersion}&api-key={apiKey}&search=&%24count=true&%24top={batch}&%24skip={offset}&searchMode=all&scoringProfile=FieldBoost&%24orderby=sortableTitle".format(batch=batch, offset=offset, **azureSearchSettings)
 
     def run(self):
         settings = self.get_resource_data()
-        offset = 20
+        offset = 0
+        batch = 10
         while True:
-            url = self.json_browser_url(settings, offset=offset)
+            url = self.json_browser_url(settings, offset=offset, batch=batch)
             req = requests.get(url)
             data = req.json()
             #num_registers = data["@odata.count"]
-            for resource in data["value"]:
+            queue = data["value"]
+            while len(queue) > 0:
+                resource = queue.pop(0)
                 url = self.build_resource_url(resource["id"], resource["collection"])
                 try:
                     document = downloader.read(url, loadjs=False)#, session=sess)
                     page = BeautifulSoup(document, 'html.parser')
                 except requests.exceptions.HTTPError as e:
                     LOGGER.info("Error: {}".format(e))
+                except requests.exceptions.ConnectionError:
+                    ### this is a weird error, may be it's raised when teachengineering's webpage
+                    ### is slow to respond requested resources
+                    LOGGER.info("Connection error, the resource will be scraped in 5s...")
+                    queue.insert(0, resource)
+                    time.sleep(5)
+                #except client.HTTPException as e:
+                #    queue.append(resource)
+                #    time.sleep(5)
                 else:
                     collection = Collection(page, filepath="/tmp/"+resource["id"]+".zip", 
                         source_id=url,
                         type=resource["collection"])
                     collection.to_file(PATH, [resource["collection"]])
-                    time.sleep(.2)
-            offset += 10
-            if offset > 60:
+                    time.sleep(TIME_SLEEP)
+            offset += batch
+            if offset > 20:
                 return
 
     def build_resource_url(self, id_name, collection):
@@ -164,11 +179,15 @@ class Menu(object):
     """
         This class checks elements on the lesson menu and build the menu list
     """
-    def __init__(self, page, filename=None, id_=None, exclude_titles=None):
+    def __init__(self, page, filename=None, id_=None, exclude_titles=None, 
+                include_titles=None):
         self.body = page.find("div", id=id_)
         self.menu = OrderedDict()
         self.filename = filename
         self.exclude_titles = [] if exclude_titles is None else exclude_titles
+        if include_titles is not None:
+            for title in include_titles:
+                self.add(title)
         self.menu_titles(self.body.find_all("li"))
 
     def write(self, content):
@@ -190,7 +209,7 @@ class Menu(object):
 
     def add(self, title):
         name = title.lower().strip().replace(" ", "_").replace("/", "_")
-        if not name in self.exclude_titles:
+        if not title in self.exclude_titles:
             self.menu[name] = {
                 "filename": "{}.html".format(name),
                 "text": title,
@@ -238,6 +257,7 @@ class CurriculumType(object):
 class Activity(CurriculumType):
     def __init__(self):
         self.sections = [
+            {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection], 
             "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
@@ -263,6 +283,7 @@ class Activity(CurriculumType):
 class Lesson(CurriculumType):
     def __init__(self):
         self.sections = [
+            {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection], "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
@@ -284,6 +305,7 @@ class Lesson(CurriculumType):
 class CurricularUnit(CurriculumType):
     def __init__(self):
         self.sections = [
+            {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": None, "class": [CurriculumHeader, Summary], "menu_name": "summary"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
@@ -299,6 +321,7 @@ class CurricularUnit(CurriculumType):
 class Sprinkle(CurriculumType):
     def __init__(self):
         self.sections = [
+            {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": None, "class": [CurriculumHeader, Introduction], "menu_name": "introduction"},
             {"id": "sups", "class": CollectionSection, "menu_name": "supplies"},
             {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
@@ -312,6 +335,7 @@ class Sprinkle(CurriculumType):
 class MakerChallenge(CurriculumType):
     def __init__(self):
         self.sections = [
+            {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": None, "class": [CurriculumHeader, Summary], "menu_name": "maker_challenge_recap"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "mats", "class": CollectionSection, "menu_name": "maker_materials_&_supplies"},
@@ -334,7 +358,7 @@ class Collection(object):
         self.title = self.clean_title(self.page.find("span", class_="curriculum-title"))
         self.contribution_by = None
         self.menu = Menu(self.page, filename=filepath, id_="CurriculumNav", 
-            exclude_titles=["attachments", "comments"])
+            exclude_titles=["Attachments", "Comments"], include_titles=["Quick Look"])
         self.menu.add("Info")
         self.source_id = source_id
         self.type = type
@@ -481,13 +505,13 @@ class CollectionSection(object):
         for a in self.body.find_all("a"):
             try:
                 resp = sess.head(a["href"], allow_redirects=True)
-                if YouTubeResource.is_youtube(resp.url):
+                if YouTubeResource.is_youtube(resp.url, get_channel=False):
                     urls.add(resp.url)
             except requests.exceptions.MissingSchema:
                 pass
             except KeyError:
                 pass
-        #print(urls)
+        
         for i, url in enumerate(urls):
             resource = YouTubeResource(url)
             resource.to_file()
@@ -523,6 +547,20 @@ class CurriculumHeader(CollectionSection):
         self.menu_name = menu_name
         self.id = id_
         self.resources = []
+
+
+class QuickLook(CollectionSection):
+     def __init__(self, page, filename=None, id_="quick", menu_name="quick_look"):
+        super(QuickLook, self).__init__(page, filename=filename,
+                id_=id_, menu_name=menu_name)
+        self.body = page.find("div", class_="quick-look")
+        ## cleaning html code
+        for s in self.body.find_all("script"):
+            s.extract()
+        for b in self.body.find_all("button"):
+            b.extract()
+        div = self.body.find("div", id="PrintShareModal")
+        div.extract()
 
 
 class EngineeringConnection(CollectionSection):
@@ -628,8 +666,11 @@ class YouTubeResource(ResourceType):
         self.file_format = file_formats.MP4
 
     @classmethod
-    def is_youtube(self, url):
-        return url.find("youtube") != -1 or url.find("youtu.be") != -1
+    def is_youtube(self, url, get_channel=False):
+        youtube = url.find("youtube") != -1 or url.find("youtu.be") != -1
+        if get_channel is False:
+            youtube = youtube and url.find("user") == -1 and url.find("/c/") == -1
+        return youtube
 
     @classmethod
     def transform_embed(self, url):
@@ -668,6 +709,8 @@ class YouTubeResource(ResourceType):
                     if filepath is not None:
                         self.add_resource_file(filepath, metadata, local=True)
                         return True
+            except KeyError:
+                LOGGER.info('Not license found')
             except(youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
                     youtube_dl.utils.ExtractorError) as e:
                 LOGGER.info('error_occured ' + str(e))
