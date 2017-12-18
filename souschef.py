@@ -61,7 +61,7 @@ BASE_URL = "https://www.teachengineering.org"
 DOWNLOAD_VIDEOS = True
 
 # time.sleep for debugging proporses, it helps to check log messages
-TIME_SLEEP = .2
+TIME_SLEEP = .8
 
 
 # Main Scraping Method
@@ -82,9 +82,10 @@ def scrape_source(writer):
 def test():
     #url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
     #url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson01" #video
-    url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
+    #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
     #url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
     #url = "https://www.teachengineering.org/activities/view/uoh_circuit_lesson01_activity1"
+    url = "https://www.teachengineering.org/activities/view/design_packing"
     #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
     #collection_type = "Lessons"
@@ -142,7 +143,7 @@ class ResourceBrowser(object):
             url = self.json_browser_url(settings, offset=offset, batch=batch)
             req = requests.get(url)
             data = req.json()
-            #num_registers = data["@odata.count"]
+            num_registers = data["@odata.count"]
             queue = data["value"]
             while len(queue) > 0:
                 resource = queue.pop(0)
@@ -168,7 +169,7 @@ class ResourceBrowser(object):
                     collection.to_file(PATH, [resource["collection"]])
                     time.sleep(TIME_SLEEP)
             offset += batch
-            if offset > 20:
+            if offset > num_registers:
                 return
 
     def build_resource_url(self, id_name, collection):
@@ -379,7 +380,7 @@ class Collection(object):
 
     def clean_title(self, title):
         if title is not None:
-            text = re.sub('\(|\)', '_', title.text)
+            text = title.text.replace("\t", " ")#re.sub('\(|\)', '_', title.text)
             return text.strip()
 
     def to_file(self, PATH, levels):
@@ -502,15 +503,34 @@ class CollectionSection(object):
                 urls.add(YouTubeResource.transform_embed(url))
             iframe.extract()
 
-        for a in self.body.find_all("a"):
+        queue = self.body.find_all("a")
+        max_tries = 4
+        num_tries = 0
+        while queue:
             try:
+                a = queue.pop(0)
                 resp = sess.head(a["href"], allow_redirects=True)
                 if YouTubeResource.is_youtube(resp.url, get_channel=False):
                     urls.add(resp.url)
             except requests.exceptions.MissingSchema:
                 pass
+            except requests.exceptions.TooManyRedirects:
+                LOGGER.info("Too many redirections, skip resource: {}".format(a["href"]))
+            except requests.exceptions.ConnectionError:
+                ### this is a weird error, perhaps it's raised when teachengineering's webpage
+                ### is slow to respond requested resources
+                LOGGER.info(a["href"])
+                LOGGER.info("Connection error, the resource will be scraped in 5s... num try {}".format(num_tries))
+                if num_tries < max_tries:
+                    queue.insert(0, a)
+                else:
+                    LOGGER.info("Connection error, give up.")
+                num_tries += 1
+                time.sleep(5)
             except KeyError:
                 pass
+            else:
+                num_tries = 0
         
         for i, url in enumerate(urls):
             resource = YouTubeResource(url)
