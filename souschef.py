@@ -61,7 +61,7 @@ BASE_URL = "https://www.teachengineering.org"
 DOWNLOAD_VIDEOS = True
 
 # time.sleep for debugging proporses, it helps to check log messages
-TIME_SLEEP = .8
+TIME_SLEEP = .1
 
 
 # Main Scraping Method
@@ -75,21 +75,25 @@ def scrape_source(writer):
     CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
     LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
     resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
-    #resource_browser.run()
-    test()
+    resource_browser.run()
+    #test()
    
 
 def test():
+    """
+    Test individual resources
+    """
     #url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
     #url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson01" #video
     #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
     #url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
     #url = "https://www.teachengineering.org/activities/view/uoh_circuit_lesson01_activity1"
-    url = "https://www.teachengineering.org/activities/view/design_packing"
+    #url = "https://www.teachengineering.org/activities/view/design_packing"
+    url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson02"
     #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
-    #collection_type = "Lessons"
-    collection_type = "Activities"
+    collection_type = "Lessons"
+    #collection_type = "Activities"
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
@@ -158,7 +162,7 @@ class ResourceBrowser(object):
                     ### is slow to respond requested resources
                     LOGGER.info("Connection error, the resource will be scraped in 5s...")
                     queue.insert(0, resource)
-                    time.sleep(5)
+                    time.sleep(3)
                 #except client.HTTPException as e:
                 #    queue.append(resource)
                 #    time.sleep(5)
@@ -312,8 +316,6 @@ class CurricularUnit(CurriculumType):
             {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
             {"id": "schedule", "class": CollectionSection, "menu_name": "unit_schedule"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
-            #{"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
-            #{"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
             {"id": None, "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
@@ -388,12 +390,12 @@ class Collection(object):
         LOGGER.info("   - URL: {}".format(self.source_id))
         self.menu.to_file()
         copy_page = copy.copy(self.page)
-        resources = []
+        #resources = []
         for section in self.curriculum_type.render(self.page, self.menu.filename):
             menu_filename = self.menu.set_section(section)
             menu_index = self.menu.to_html(directory="", active_li=menu_filename)
             section.to_file(menu_filename, menu_index=menu_index)
-            resources = resources + section.resources
+            #resources += section.resources
 
         self.menu.check()
         cr = Copyright(copy_page)
@@ -407,10 +409,14 @@ class Collection(object):
         levels.append(self.title.replace("/", "-"))
         PATH.set(*levels)
         writer.add_file(str(PATH), "Curriculum", self.menu.filename, **metadata_dict)
-        attachments = Attachments(self.page)
-        writer.add_folder(str(PATH), "Attachments", **metadata_dict)
-        PATH.set(*(levels+["Attachments"]))
-        for name, pdf_url in attachments.get_pdfs():
+        #self.page was cleaned and doesnot have links
+        all_sections = CollectionSection(copy_page)
+        #searching for videos in the entire page because some videos are outside of the sections.
+        all_sections.get_videos()
+        resources = all_sections.resources
+        writer.add_folder(str(PATH), "Files", **metadata_dict)
+        PATH.set(*(levels+["Files"]))
+        for name, pdf_url in all_sections.get_pdfs():
             meta = metadata_dict.copy()
             meta["source_id"] = pdf_url
             try:
@@ -420,7 +426,7 @@ class Collection(object):
 
         if len(resources) > 0:
             PATH.go_to_parent_folder()
-            PATH.set(*(levels+["VIDEOS"]))
+            PATH.set(*(levels+["Videos"]))
             for file_src, file_metadata in resources:
                 try:
                     meta = file_metadata if len(file_metadata) > 0 else metadata_dict
@@ -442,7 +448,10 @@ class CollectionSection(object):
     def __init__(self,  page, filename=None, id_=None, menu_name=None):
         LOGGER.debug(id_)
         self.id = id_
-        self.body = page.find("section", id=id_)
+        if id_ is None:
+            self.body = page
+        else:
+            self.body = page.find("section", id=id_)
 
         if self.body is not None:
             h3 = self.body.find("h3")
@@ -481,9 +490,19 @@ class CollectionSection(object):
     def get_content(self):
         content = self.body
         self.get_imgs()
-        self.get_videos()
+        #self.get_videos()
         remove_links(content)
         return "".join([str(p) for p in content])
+
+    def get_pdfs(self):
+        ulrs = set([])
+        if self.body is not None:
+            resource_links = self.body.find_all("a", href=re.compile("^\/content|https\:\/\/www.teachengineering"))
+            for link in resource_links:
+                if link["href"].endswith(".pdf") and link["href"] not in ulrs:
+                    name = get_name_from_url(link["href"])
+                    ulrs.add(link["href"])
+                    yield name, urljoin(BASE_URL, link["href"])
 
     def get_imgs(self):
         for img in self.body.find_all("img"):
@@ -503,15 +522,21 @@ class CollectionSection(object):
                 urls.add(YouTubeResource.transform_embed(url))
             iframe.extract()
 
-        queue = self.body.find_all("a")
-        max_tries = 4
+        queue = self.body.find_all("a", href=re.compile("^http"))
+        max_tries = 3
         num_tries = 0
         while queue:
             try:
                 a = queue.pop(0)
-                resp = sess.head(a["href"], allow_redirects=True)
-                if YouTubeResource.is_youtube(resp.url, get_channel=False):
-                    urls.add(resp.url)
+                ### some links who are youtube resources have shorted thier ulrs
+                ### with session.head we can expand it
+                if check_shorter_url(a["href"]):
+                    resp = sess.head(a["href"], allow_redirects=True)
+                    url = resp.url
+                else:
+                    url = a["href"]
+                if YouTubeResource.is_youtube(url, get_channel=False):
+                    urls.add(url)
             except requests.exceptions.MissingSchema:
                 pass
             except requests.exceptions.TooManyRedirects:
@@ -520,13 +545,13 @@ class CollectionSection(object):
                 ### this is a weird error, perhaps it's raised when teachengineering's webpage
                 ### is slow to respond requested resources
                 LOGGER.info(a["href"])
-                LOGGER.info("Connection error, the resource will be scraped in 5s... num try {}".format(num_tries))
+                num_tries += 1
+                LOGGER.info("Connection error, the resource will be scraped in 3s... num try {}".format(num_tries))
                 if num_tries < max_tries:
                     queue.insert(0, a)
                 else:
                     LOGGER.info("Connection error, give up.")
-                num_tries += 1
-                time.sleep(5)
+                time.sleep(3)
             except KeyError:
                 pass
             else:
@@ -608,14 +633,6 @@ class Attachments(CollectionSection):
     def __init__(self, page, filename=None, id_="attachments", menu_name="attachments"):
         super(Attachments, self).__init__(page, filename=filename,
                 id_=id_, menu_name=menu_name)
-
-    def get_pdfs(self):
-        if self.body is not None:
-            resource_links = self.body.find_all("a", href=re.compile("^\/|https\:\/\/www.teachengineering"))
-            for link in resource_links:
-                if link["href"].endswith(".pdf"):
-                    name = get_name_from_url(link["href"])
-                    yield name, urljoin(BASE_URL, link["href"])
 
 
 class Contributors(CollectionSection):
@@ -773,6 +790,19 @@ def remove_links(content):
     if content is not None:
         for link in content.find_all("a"):
             link.replaceWithChildren()
+
+
+def check_shorter_url(url):
+    shorters_urls = set(["bitly.com", "goo.gl", "tinyurl.com", "ow.ly", "ls.gd", 
+                "buff.ly", "adf.ly", "bit.do", "mcaf.ee"])
+    index_init = url.find("://")
+    index_end = url[index_init+3:].find("/")
+    if index_init != -1:
+        if index_end == -1:
+            index_end = len(url[index_init+3:])
+        domain = url[index_init+3:index_end+index_init+3]
+        check = len(domain) < 12 or domain in shorters_urls
+        return check
 
 
 # CLI: This code will run when `souschef.py` is called on the command line
