@@ -89,11 +89,15 @@ def test():
     #url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
     #url = "https://www.teachengineering.org/activities/view/uoh_circuit_lesson01_activity1"
     #url = "https://www.teachengineering.org/activities/view/design_packing"
-    url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson02"
+    #url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson02"
+    #url = "https://www.teachengineering.org/activities/view/cub_natdis_lesson07_activity1"
+    #url = "https://www.teachengineering.org/lessons/view/uta_dense_lesson01"
+    #url = "https://www.teachengineering.org/activities/view/cub_flyingtshirt_lesson01_activity1"
+    url = "https://www.teachengineering.org/activities/view/mis_scaling_lesson01_activity1"
     #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
-    collection_type = "Lessons"
-    #collection_type = "Activities"
+    #collection_type = "Lessons"
+    collection_type = "Activities"
     try:
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False)#, session=sess)
@@ -147,34 +151,38 @@ class ResourceBrowser(object):
             url = self.json_browser_url(settings, offset=offset, batch=batch)
             req = requests.get(url)
             data = req.json()
-            num_registers = data["@odata.count"]
-            queue = data["value"]
-            while len(queue) > 0:
-                resource = queue.pop(0)
-                url = self.build_resource_url(resource["id"], resource["collection"])
-                try:
-                    document = downloader.read(url, loadjs=False)#, session=sess)
-                    page = BeautifulSoup(document, 'html.parser')
-                except requests.exceptions.HTTPError as e:
-                    LOGGER.info("Error: {}".format(e))
-                except requests.exceptions.ConnectionError:
-                    ### this is a weird error, may be it's raised when teachengineering's webpage
-                    ### is slow to respond requested resources
-                    LOGGER.info("Connection error, the resource will be scraped in 5s...")
-                    queue.insert(0, resource)
-                    time.sleep(3)
-                #except client.HTTPException as e:
-                #    queue.append(resource)
-                #    time.sleep(5)
-                else:
-                    collection = Collection(page, filepath="/tmp/"+resource["id"]+".zip", 
-                        source_id=url,
-                        type=resource["collection"])
-                    collection.to_file(PATH, [resource["collection"]])
-                    time.sleep(TIME_SLEEP)
-            offset += batch
-            if offset > num_registers:
-                return
+            try:
+                num_registers = data["@odata.count"]
+                #num_registers = 15
+            except KeyError:
+                LOGGER.info("The json object is bad formed: {}".format(data))
+                LOGGER.info("retry...")
+                time.sleep(3)
+            else:
+                queue = data["value"]
+                while len(queue) > 0:
+                    resource = queue.pop(0)
+                    url = self.build_resource_url(resource["id"], resource["collection"])
+                    try:
+                        document = downloader.read(url, loadjs=False)#, session=sess)
+                        page = BeautifulSoup(document, 'html.parser')
+                    except requests.exceptions.HTTPError as e:
+                        LOGGER.info("Error: {}".format(e))
+                    except requests.exceptions.ConnectionError:
+                        ### this is a weird error, may be it's raised when teachengineering's webpage
+                        ### is slow to respond requested resources
+                        LOGGER.info("Connection error, the resource will be scraped in 5s...")
+                        queue.insert(0, resource)
+                        time.sleep(3)
+                    else:
+                        collection = Collection(page, filepath="/tmp/"+resource["id"]+".zip", 
+                            source_id=url,
+                            type=resource["collection"])
+                        collection.to_file(PATH, [resource["collection"]])
+                        time.sleep(TIME_SLEEP)
+                offset += batch
+                if offset > num_registers:
+                    return
 
     def build_resource_url(self, id_name, collection):
         return urljoin(BASE_URL, collection.lower()+"/view/"+id_name)
@@ -699,8 +707,13 @@ class ResourceType(object):
 class YouTubeResource(ResourceType):
     def __init__(self, resource_url, type_name="Youtube"):
         super(YouTubeResource, self).__init__(type_name=type_name)
-        self.resource_url = resource_url
+        self.resource_url = self.clean_url(resource_url)
         self.file_format = file_formats.MP4
+
+    def clean_url(self, url):
+        if url[-1] == "/":
+            url = url[:-1]
+        return url.strip()
 
     @classmethod
     def is_youtube(self, url, get_channel=False):
