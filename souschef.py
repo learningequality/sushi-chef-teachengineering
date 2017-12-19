@@ -1,30 +1,26 @@
 #!/usr/bin/env python
-import os
-import sys
-from ricecooker.utils import data_writer, path_builder, downloader, html_writer
-from le_utils.constants import licenses, exercises, content_kinds, file_formats, format_presets, languages
-
-from collections import OrderedDict
-import logging
-import os
-from pathlib import Path
-from http import client
-import re
-import sys
-import time
-import copy
-import pafy
-import youtube_dl
-from urllib.error import URLError
-from urllib.parse import urlparse, urljoin
 
 from bs4 import BeautifulSoup
-from le_utils.constants import licenses, file_formats
+from bs4 import Tag
+from collections import OrderedDict
+import copy
+from http import client
 import json
+from le_utils.constants import licenses, exercises, content_kinds, file_formats, format_presets, languages
+import logging
+import os
+import pafy
+from pathlib import Path
+import re
 import requests
 from ricecooker.classes.files import download_from_web, config
 from ricecooker.utils.caching import CacheForeverHeuristic, FileCache, CacheControlAdapter
-
+from ricecooker.utils import data_writer, path_builder, downloader, html_writer
+import sys
+import time
+from urllib.error import URLError
+from urllib.parse import urlparse, urljoin
+import youtube_dl
 
 # Channel constants
 ################################################################################
@@ -472,8 +468,6 @@ class CollectionSection(object):
         self.resources = []
 
     def __add__(self, o):
-        from bs4 import Tag
-        
         if isinstance(self.body, Tag) and isinstance(o.body, Tag):
             parent = Tag(name="div")
             parent.insert(0, self.body)
