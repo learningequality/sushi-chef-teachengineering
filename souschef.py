@@ -79,17 +79,7 @@ def test():
     """
     Test individual resources
     """
-    #url = "https://www.teachengineering.org/lessons/view/cub_environ_lesson05" #video
-    #url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson01" #video
-    #url = "https://www.teachengineering.org/sprinkles/view/cub_rocket_sprinkle1"
-    #url = "https://www.teachengineering.org/makerchallenges/view/nds-1746-creative-crash-test-cars-mass-momentum"
-    #url = "https://www.teachengineering.org/activities/view/uoh_circuit_lesson01_activity1"
-    #url = "https://www.teachengineering.org/activities/view/design_packing"
-    #url = "https://www.teachengineering.org/lessons/view/cub_surg_lesson02"
-    #url = "https://www.teachengineering.org/activities/view/cub_natdis_lesson07_activity1"
-    #url = "https://www.teachengineering.org/lessons/view/uta_dense_lesson01"
-    #url = "https://www.teachengineering.org/activities/view/cub_flyingtshirt_lesson01_activity1"
-    url = "https://www.teachengineering.org/activities/view/mis_scaling_lesson01_activity1"
+    url = "https://www.teachengineering.org/activities/view/gat_esr_test_activity1"
     #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
     #collection_type = "Lessons"
@@ -771,7 +761,7 @@ class YouTubeResource(ResourceType):
             except (URLError, ConnectionResetError) as e:
                 LOGGER.info(e)
                 LOGGER.info("Download retry:"+str(try_number))
-                time.sleep(.5)
+                time.sleep(.8)
             else:
                 return filepath
 
@@ -790,7 +780,12 @@ def get_name_from_url(url):
 
 def get_name_from_url_no_ext(url):
     path = get_name_from_url(url)
-    return ".".join(path.split(".")[:-1])
+    path_split = path.split(".")
+    if len(path_split) > 1:
+        name = ".".join(path_split[:-1])
+    else:
+        name = path_split[0]
+    return name
 
 
 def remove_links(content):
