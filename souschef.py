@@ -8,6 +8,7 @@ from http import client
 import json
 from le_utils.constants import licenses, exercises, content_kinds, file_formats, format_presets, languages
 import logging
+import ntpath
 import os
 import pafy
 from pathlib import Path
@@ -19,7 +20,7 @@ from ricecooker.utils import data_writer, path_builder, downloader, html_writer
 import sys
 import time
 from urllib.error import URLError
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urljoin
 import youtube_dl
 
 # Channel constants
@@ -775,7 +776,8 @@ def if_file_exists(filepath):
 
 
 def get_name_from_url(url):
-    return os.path.basename(urlparse(url).path)
+    head, tail = ntpath.split(url)
+    return tail or ntpath.basename(url)
 
 
 def get_name_from_url_no_ext(url):
