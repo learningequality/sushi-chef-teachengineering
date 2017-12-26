@@ -39,10 +39,7 @@ The zip archive can then be imported into Kolibri Studio using a LineCook script
 
 ## Usage
 
-TODO: Explain how to run the Teach Engineering chef
-
-      export SOMEVAR=someval
-      ./script.py -v --option2 --kwoard="val"
+      ./souschef.py
 
 
 
