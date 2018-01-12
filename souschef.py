@@ -19,7 +19,7 @@ from ricecooker.classes.licenses import get_license
 from ricecooker.chefs import JsonTreeChef
 from ricecooker.utils.caching import CacheForeverHeuristic, FileCache, CacheControlAdapter
 from ricecooker.utils import data_writer, path_builder, downloader, html_writer
-from ricecooker.utils.jsontrees import write_tree_to_json_tree
+from ricecooker.utils.jsontrees import write_tree_to_json_tree, SUBTITLES_FILE
 import sys
 import time
 from urllib.error import URLError
@@ -106,11 +106,11 @@ def check_subtitles(page):
     urls = c.get_videos_urls()
     for url in urls:
         video = YouTubeResource(url)
-        info = video.get_info_subtitles()
+        info = video.get_video_info()
         if isinstance(info, dict) and len(info.keys()) > 0:
             with open("/tmp/subtitles.csv", 'a') as csv_file:
                 csv_writer = csv.writer(csv_file, delimiter=",")
-                csv_writer.writerow([url] + list(info.keys()))
+                csv_writer.writerow([url] + list(info["subtitles"].keys()))
             
 
 class ResourceBrowser(object):
@@ -548,10 +548,10 @@ class CollectionSection(object):
                     source_id=pdf_url,
                     title=get_name_from_url_no_ext(name),
                     description='',
-                    files=dict(
+                    files=[dict(
                         file_type=content_kinds.DOCUMENT,
                         path=pdf_filepath
-                    ),
+                    )],
                     language="en",
                     license="")
                 info["children"].append(files)
@@ -764,10 +764,6 @@ class ResourceType(object):
 
     def add_resource_file(self, info):
         self.resource_file = info
-    #    if local is True:
-    #        self.resource_file = (src, metadata)
-    #    else:
-    #        self.resource_file = (urljoin(BASE_URL, src), metadata)
 
 
 class YouTubeResource(ResourceType):
@@ -793,66 +789,56 @@ class YouTubeResource(ResourceType):
         url = "".join(url.split("?")[:1])
         return url.replace("embed/", "watch?v=")
 
-    def get_info_subtitles(self):
+    def get_video_info(self):
         ydl_options = {
                 'writesubtitles': True,
+                'allsubtitles': True,
                 'no_warnings': True,
+                'restrictfilenames':True,
                 'continuedl': True,
                 'quiet': False,
+                'format': "bestvideo[height<={maxheight}][ext=mp4]+bestaudio[ext=m4a]/best[height<={maxheight}][ext=mp4]".format(maxheight='720')
             }
 
         with youtube_dl.YoutubeDL(ydl_options) as ydl:
             try:
                 ydl.add_default_info_extractors()
                 info = ydl.extract_info(self.resource_url, download=False)
-                print(self.resource_url)
-                return info["subtitles"]
+                return info
             except(youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
                     youtube_dl.utils.ExtractorError) as e:
-                LOGGER.info('error_occured ' + str(e))
+                LOGGER.info('An error occured ' + str(e))
                 LOGGER.info(self.resource_url)
-            except KeyError:
-                pass
+            except KeyError as e:
+                LOGGER.info(str(e))
+
+    def subtitles_dict(self):
+        video_info = self.get_video_info()
+        video_id = video_info["id"]
+        subtitles_info = video_info["subtitles"]
+        subs = []
+        for language in subtitles_info.keys():
+            subs.append(dict(file_type=SUBTITLES_FILE, youtube_id=video_id, language=language))
+        return subs
 
     def process_file(self, download=False, filepath=None):
-        ydl_options = {
-            #'outtmpl': '%(title)s-%(id)s.%(ext)s',
-            #'format': 'bestaudio/best',
-            'writethumbnail': False,
-            'no_warnings': True,
-            'continuedl': False,
-            'restrictfilenames':True,
-            'quiet': False,
-            'format': "bestvideo[height<={maxheight}][ext=mp4]+bestaudio[ext=m4a]/best[height<={maxheight}][ext=mp4]".format(maxheight='720'),
-        }
+        if download is True:
+            video_filepath = self.video_download(download_to=filepath)
+        else:
+            video_filepath = None
 
-        with youtube_dl.YoutubeDL(ydl_options) as ydl:
-            try:
-                ydl.add_default_info_extractors()
-                info = ydl.extract_info(self.resource_url, download=False)
-                if info["license"] == "Standard YouTube License" or info["license"] is None:
-                    if download is True:
-                        video_filepath = self.video_download(download_to=filepath)
-                    else:
-                        video_filepath = None
+        if video_filepath is not None:
+            files = [dict(file_type=content_kinds.VIDEO, path=video_filepath)]
+            files += self.subtitles_dict()
 
-                    if video_filepath is not None:
-                        self.add_resource_file(dict(
-                            kind=content_kinds.VIDEO,
-                            source_id=self.resource_url,
-                            title=get_name_from_url_no_ext(video_filepath),
-                            description='',
-                            files=dict(
-                                file_type=content_kinds.VIDEO,
-                                path=video_filepath
-                            ),
-                            language="en",
-                            license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()))
-            except KeyError:
-                LOGGER.info('Not license found')
-            except(youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
-                    youtube_dl.utils.ExtractorError) as e:
-                LOGGER.info('error_occured ' + str(e))
+            self.add_resource_file(dict(
+                kind=content_kinds.VIDEO,
+                source_id=self.resource_url,
+                title=get_name_from_url_no_ext(video_filepath),
+                description='',
+                files=files,
+                language="en",
+                license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()))
 
     #youtubedl has some troubles downloading videos in youtube,
     #sometimes raises connection error
