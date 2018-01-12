@@ -58,7 +58,7 @@ BASE_URL = "https://www.teachengineering.org"
 
 # If False then no download is made
 # for debugging proporses
-DOWNLOAD_VIDEOS = False
+DOWNLOAD_VIDEOS = True
 
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .1
@@ -66,16 +66,16 @@ TIME_SLEEP = .1
 
 # Main Scraping Method
 ################################################################################
-def scrape_source(writer):
-    """
-    Scrapes channel page and writes to a DataWriter
-    Args: writer (DataWriter): class that writes data to folder/spreadsheet structure
-    Returns: None
-    """
-    CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
-    LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
-    resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
-    resource_browser.run()
+#def scrape_source(writer):
+#    """
+#    Scrapes channel page and writes to a DataWriter
+#    Args: writer (DataWriter): class that writes data to folder/spreadsheet structure
+#    Returns: None
+#    """
+#    CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
+#    LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
+#    resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
+#    resource_browser.run()
     #test()
    
 
@@ -167,30 +167,12 @@ class ResourceBrowser(object):
                 while len(queue) > 0:
                     resource = queue.pop(0)
                     url = self.build_resource_url(resource["id"], resource["collection"])
-                    #try:
-                        #document = downloader.read(url, loadjs=False)#, session=sess)
-                        #page = BeautifulSoup(document, 'html.parser')
-                    #except requests.exceptions.HTTPError as e:
-                    #    LOGGER.info("Error: {}".format(e))
-                    #except requests.exceptions.ConnectionError:
-                        ### this is a weird error, may be it's raised when teachengineering's webpage
-                        ### is slow to respond requested resources
-                    #    LOGGER.info("Connection error, the resource will be scraped in 5s...")
-                    #    queue.insert(0, resource)
-                    #    time.sleep(3)
-                    #else:
                     yield dict(url=url, collection=resource["collection"],  
                         spanishVersionId=resource["spanishVersionId"],
                         title=resource["title"], summary=resource["summary"],
                         grade_target=resource["gradeTarget"],
                         grade_range=resource["gradeRange"],
                         id=resource["id"])
-                        #collection = Collection(page, filepath="/tmp/"+resource["id"]+".zip", 
-                        #    source_id=url,
-                        #    type=resource["collection"])
-                        #collection.to_file(PATH, [resource["collection"]])
-                        #check_subtitles(page)
-                        #time.sleep(TIME_SLEEP)
                 offset += batch
                 if offset > num_registers:
                     break
@@ -203,11 +185,11 @@ class Menu(object):
     """
         This class checks elements on the lesson menu and build the menu list
     """
-    def __init__(self, page, filename=None, id_=None, exclude_titles=None, 
+    def __init__(self, page, filepath=None, id_=None, exclude_titles=None, 
                 include_titles=None):
         self.body = page.find("div", id=id_)
         self.menu = OrderedDict()
-        self.filename = filename
+        self.filepath = filepath
         self.exclude_titles = [] if exclude_titles is None else exclude_titles
         if include_titles is not None:
             for title in include_titles:
@@ -215,7 +197,7 @@ class Menu(object):
         self.menu_titles(self.body.find_all("li"))
 
     def write(self, content):
-        with html_writer.HTMLWriter(self.filename, "w") as zipper:
+        with html_writer.HTMLWriter(self.filepath, "w") as zipper:
             zipper.write_index_contents(content)
 
     def to_file(self):
@@ -266,7 +248,7 @@ class Menu(object):
     def info(self):
         return dict(
             kind=content_kinds.HTML5,
-            source_id=self.filename,
+            source_id=self.filepath,
             title="Menu Index",
             description="",
             license="",
@@ -274,7 +256,7 @@ class Menu(object):
             files=[
                 dict(
                     file_type=content_kinds.HTML5,
-                    path=self.filename
+                    path=self.filepath
                 )
             ]
         ) 
@@ -396,11 +378,14 @@ class Collection(object):
             self.title_prefix = self.clean_title(self.page.find("span", class_="title-prefix"))
             self.title = title#self.clean_title(self.page.find("span", class_="curriculum-title"))
             self.contribution_by = None
-            self.filepath = "/tmp/{source_id}.zip".format(source_id=source_id)
-            self.menu = Menu(self.page, filename=self.filepath, id_="CurriculumNav", 
+            filepath = build_path(['chefdata', 'menu', self.title])
+            self.filepath = "{path}/{source_id}.zip".format(path=filepath, 
+                source_id=source_id)
+            self.menu = Menu(self.page, filepath=self.filepath, id_="CurriculumNav", 
                 exclude_titles=["Attachments", "Comments"], include_titles=["Quick Look"])
             self.menu.add("Info")
-            self.source_id = url
+            self.source_id = source_id
+            self.resource_url = url
             self.type = type
             
             if type == "MakerChallenges":
@@ -438,18 +423,18 @@ class Collection(object):
 
     def clean_title(self, title):
         if title is not None:
-            text = title.text.replace("\t", " ")#re.sub('\(|\)', '_', title.text)
+            text = title.text.replace("\t", " ")
             return text.strip()
 
     def to_file(self, channel_tree):
         LOGGER.info(" + [{}]: {}".format(self.type, self.title))
-        LOGGER.info("   - URL: {}".format(self.source_id))
+        LOGGER.info("   - URL: {}".format(self.resource_url))
         copy_page = copy.copy(self.page)
         cr = Copyright(copy_page)
 
         topic_node = dict(
             kind=content_kinds.TOPIC,
-            source_id=self.source_id,
+            source_id=self.resource_url,
             title=self.title,
             description=self.description(),
             license=get_license(licenses.CC_BY, copyright_holder=cr.get_copyright_info()).as_dict(),
@@ -458,69 +443,30 @@ class Collection(object):
 
         #build the menu index
         self.menu.to_file()
-        
         #set section's html files to the menu
-        for section in self.curriculum_type.render(self.page, self.menu.filename):
+        for section in self.curriculum_type.render(self.page, self.menu.filepath):
             menu_filename = self.menu.set_section(section)
             menu_index = self.menu.to_html(directory="", active_li=menu_filename)
             section.to_file(menu_filename, menu_index=menu_index)
 
         self.menu.check()
-        #metadata_dict = {"description": self.description(),
-        #    "language": "en",
-        #    "license": licenses.CC_BY,
-        #    "copyright_holder": cr.get_copyright_info(),
-        #    "author": "",
-        #    "source_id": self.source_id}
-
         topic_node["children"].append(self.menu.info())
-
-        #levels.append(self.title.replace("/", "-"))
-        #PATH.set(*levels)
-        #writer.add_file(str(PATH), "Curriculum", self.menu.filename, **metadata_dict)
-        #self.page was cleaned and doesnot have links
-        all_sections = CollectionSection(copy_page)
-        #searching for videos in the entire page because some videos are outside of the sections.
-        all_sections.get_videos()
-        resources = all_sections.resources
-        #writer.add_folder(str(PATH), "Files", **metadata_dict)
-        PDFS_DATA_DIR = os.path.join("chefdata", 'pdfs', self.title)
-        pdfs_info = all_sections.save_pdfs(PDFS_DATA_DIR)
-        topic_node["children"].append(pdfs_info)
-        #PATH.set(*(levels+["Files"]))
-        #for name, pdf_url in all_sections.get_pdfs():
-            #meta = metadata_dict.copy()
-            #meta["source_id"] = pdf_url
-        #    try:
-                #writer.add_file(str(PATH), name.replace(".pdf", ""), pdf_url, **meta)
-        #        downloader.read(pdf_url)
-        #        topic_node["children"].append(files)
-        #    except requests.exceptions.HTTPError as e:
-        #        LOGGER.info("Error: {}".format(e))
-
-        #if len(resources) > 0:
-            #PATH.go_to_parent_folder()
-            #PATH.set(*(levels+["Videos"]))
-        #    for file_src, file_metadata in resources:
-        #        try:
-        #            meta = file_metadata if len(file_metadata) > 0 else metadata_dict
-        #            writer.add_file(str(PATH), get_name_from_url_no_ext(file_src), file_src, **meta)
-        #        except requests.exceptions.HTTPError as e:
-        #            LOGGER.info("Error: {}".format(e))
-
-        #if if_file_exists(self.menu.filename):
-        #    self.rm(self.menu.filename)
-        
+        #check for pdfs and videos on all page
+        all_sections = CollectionSection(copy_page, resource_url=self.resource_url)
+        pdfs_info = all_sections.get_pdfs_info(self.source_id)
+        if pdfs_info is not None:
+            topic_node["children"].append(pdfs_info)
+        videos_info = all_sections.get_videos_info(self.source_id)
+        if videos_info is not None:
+            topic_node["children"].append(videos_info)
         channel_tree["children"].append(topic_node)
-        #PATH.go_to_parent_folder()
-        #PATH.go_to_parent_folder()
 
-    def rm(self, filepath):
-        os.remove(filepath)
+    #def rm(self, filepath):
+    #    os.remove(filepath)
 
 
 class CollectionSection(object):
-    def __init__(self,  page, filename=None, id_=None, menu_name=None):
+    def __init__(self,  page, filename=None, id_=None, menu_name=None, resource_url=None):
         LOGGER.debug(id_)
         self.id = id_
         if id_ is None:
@@ -536,7 +482,7 @@ class CollectionSection(object):
             self.title = None
         self.filename = filename
         self.menu_name = menu_name
-        self.resources = []
+        self.resource_url = resource_url
 
     def __add__(self, o):
         if isinstance(self.body, Tag) and isinstance(o.body, Tag):
@@ -563,54 +509,44 @@ class CollectionSection(object):
     def get_content(self):
         content = self.body
         self.get_imgs()
-        #self.get_videos()
         remove_links(content)
         return "".join([str(p) for p in content])
 
     def get_pdfs(self):
-        ulrs = set([])
+        urls = {}
         if self.body is not None:
             resource_links = self.body.find_all("a", href=re.compile("^\/content|https\:\/\/www.teachengineering"))
             for link in resource_links:
-                if link["href"].endswith(".pdf") and link["href"] not in ulrs:
+                if link["href"].endswith(".pdf") and link["href"] not in urls:
                     name = get_name_from_url(link["href"])
-                    ulrs.add(link["href"])
-                    yield name, urljoin(BASE_URL, link["href"])
+                    urls[link["href"]] = (name, urljoin(BASE_URL, link["href"]))
+            return urls.values()
 
-    def has_pdfs(self):
-        try:
-            next(self.get_pdfs())
-        except StopIteration:
-            return False
-        else:
-            return True
-
-    def save_pdfs(self, filepath):
-        if not self.has_pdfs():
+    def get_pdfs_info(self, source_id):
+        pdfs_urls = self.get_pdfs()
+        if len(pdfs_urls) == 0:
             return
 
-        if not if_dir_exists(filepath):
-            os.makedirs(filepath)
-
+        PDFS_DATA_DIR = build_path(["chefdata", 'pdfs', source_id])
         info = dict(
             kind=content_kinds.TOPIC,
-            source_id=filepath,
+            source_id=self.resource_url,
             title="Files",
             description='',
             children=[],
             language="en",
             license="")
 
-        for name, pdf_url in self.get_pdfs():
+        for name, pdf_url in pdfs_urls:
             try:
                 response = downloader.read(pdf_url)
-                pdf_filepath = os.path.join(filepath, name)
+                pdf_filepath = os.path.join(PDFS_DATA_DIR, name)
                 with open(pdf_filepath, 'wb') as f:
                     f.write(response)
                 files = dict(
                     kind=content_kinds.DOCUMENT,
                     source_id=pdf_url,
-                    title=name.replace(".pdf", ""),
+                    title=get_name_from_url_no_ext(name),
                     description='',
                     files=dict(
                         file_type=content_kinds.DOCUMENT,
@@ -678,12 +614,27 @@ class CollectionSection(object):
                 num_tries = 0
         return urls
 
-    def get_videos(self):
-        for i, url in enumerate(self.get_videos_urls()):
+    def get_videos_info(self, source_id):
+        videos_urls = self.get_videos_urls()
+        if len(videos_urls) == 0:
+            return
+
+        VIDEOS_DATA_DIR = build_path(["chefdata", 'videos', source_id])
+        info = dict(
+            kind=content_kinds.TOPIC,
+            source_id=self.resource_url,
+            title="Videos",
+            description='',
+            children=[],
+            language="en",
+            license="")
+
+        for i, url in enumerate(videos_urls):
             resource = YouTubeResource(url)
-            resource.to_file()
+            resource.to_file(filepath=VIDEOS_DATA_DIR)
             if resource.resource_file is not None:
-                self.resources.append(resource.resource_file)
+                info["children"].append(resource.resource_file)
+        return info
 
     def write(self, filename, content):
         with html_writer.HTMLWriter(self.filename, "a") as zipper:
@@ -713,7 +664,7 @@ class CurriculumHeader(CollectionSection):
         self.filename = filename
         self.menu_name = menu_name
         self.id = id_
-        self.resources = []
+        #self.resources = []
 
 
 class QuickLook(CollectionSection):
@@ -811,11 +762,12 @@ class ResourceType(object):
     def to_file(self, filepath=None):
         pass
 
-    def add_resource_file(self, src, metadata, local=False):
-        if local is True:
-            self.resource_file = (src, metadata)
-        else:
-            self.resource_file = (urljoin(BASE_URL, src), metadata)
+    def add_resource_file(self, info):
+        self.resource_file = info
+    #    if local is True:
+    #        self.resource_file = (src, metadata)
+    #    else:
+    #        self.resource_file = (urljoin(BASE_URL, src), metadata)
 
 
 class YouTubeResource(ResourceType):
@@ -862,7 +814,7 @@ class YouTubeResource(ResourceType):
             except KeyError:
                 pass
 
-    def process_file(self, download=False):
+    def process_file(self, download=False, filepath=None):
         ydl_options = {
             #'outtmpl': '%(title)s-%(id)s.%(ext)s',
             #'format': 'bestaudio/best',
@@ -874,26 +826,28 @@ class YouTubeResource(ResourceType):
             'format': "bestvideo[height<={maxheight}][ext=mp4]+bestaudio[ext=m4a]/best[height<={maxheight}][ext=mp4]".format(maxheight='720'),
         }
 
-        metadata = {"description": "",
-            "language": "en",
-            "license": licenses.CC_BY,
-            "copyright_holder": "TeachEngineering",
-            "author": "",
-            "source_id": self.resource_url}
-
         with youtube_dl.YoutubeDL(ydl_options) as ydl:
             try:
                 ydl.add_default_info_extractors()
                 info = ydl.extract_info(self.resource_url, download=False)
                 if info["license"] == "Standard YouTube License" or info["license"] is None:
                     if download is True:
-                        filepath = self.video_download()
+                        video_filepath = self.video_download(download_to=filepath)
                     else:
-                        filepath = None
+                        video_filepath = None
 
-                    if filepath is not None:
-                        self.add_resource_file(filepath, metadata, local=True)
-                        return True
+                    if video_filepath is not None:
+                        self.add_resource_file(dict(
+                            kind=content_kinds.VIDEO,
+                            source_id=self.resource_url,
+                            title=get_name_from_url_no_ext(video_filepath),
+                            description='',
+                            files=dict(
+                                file_type=content_kinds.VIDEO,
+                                path=video_filepath
+                            ),
+                            language="en",
+                            license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()))
             except KeyError:
                 LOGGER.info('Not license found')
             except(youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
@@ -903,21 +857,21 @@ class YouTubeResource(ResourceType):
     #youtubedl has some troubles downloading videos in youtube,
     #sometimes raises connection error
     #for that I choose pafy for downloading
-    def video_download(self):
+    def video_download(self, download_to="/tmp/"):
         for try_number in range(10):
             try:
                 video = pafy.new(self.resource_url)
                 best = video.getbest(preftype="mp4")
-                filepath = best.download(filepath="/tmp/")
+                video_filepath = best.download(filepath=download_to)
             except (URLError, ConnectionResetError) as e:
                 LOGGER.info(e)
                 LOGGER.info("Download retry:"+str(try_number))
                 time.sleep(.8)
             else:
-                return filepath
+                return video_filepath
 
     def to_file(self, filepath=None):
-        self.process_file(download=DOWNLOAD_VIDEOS)
+        self.process_file(download=DOWNLOAD_VIDEOS, filepath=filepath)
 
 
 def if_file_exists(filepath):
@@ -964,6 +918,13 @@ def check_shorter_url(url):
         return check
 
 
+def build_path(levels):
+    path = os.path.join(*levels)
+    if not if_dir_exists(path):
+        os.makedirs(path)
+    return path
+
+
 class TeachEngineeringChef(JsonTreeChef):
     ROOT_URL = "https://{HOSTNAME}"
     HOSTNAME = "teachengineering.org"
@@ -1006,7 +967,6 @@ class TeachEngineeringChef(JsonTreeChef):
         channel_tree = self._build_scraping_json_tree(web_resource_tree)
         scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
                                 TeachEngineeringChef.SCRAPING_STAGE_OUTPUT)
-        print(channel_tree)
         #write_tree_to_json_tree(scrape_stage, channel_tree)
  
     def _build_scraping_json_tree(self, web_resource_tree):
