@@ -66,18 +66,6 @@ TIME_SLEEP = .1
 
 # Main Scraping Method
 ################################################################################
-#def scrape_source(writer):
-#    """
-#    Scrapes channel page and writes to a DataWriter
-#    Args: writer (DataWriter): class that writes data to folder/spreadsheet structure
-#    Returns: None
-#    """
-#    CURRICULUM_BROWSE_URL = urljoin(BASE_URL, "curriculum/browse")
-#    LOGGER.info("Checking data from: " + CURRICULUM_BROWSE_URL)
-#    resource_browser = ResourceBrowser(CURRICULUM_BROWSE_URL)
-#    resource_browser.run()
-    #test()
-   
 
 def test():
     """
@@ -191,6 +179,7 @@ class Menu(object):
         self.menu = OrderedDict()
         self.filepath = filepath
         self.exclude_titles = [] if exclude_titles is None else exclude_titles
+        self.license = None
         if include_titles is not None:
             for title in include_titles:
                 self.add(title)
@@ -251,7 +240,7 @@ class Menu(object):
             source_id=self.filepath,
             title="Menu Index",
             description="",
-            license="",
+            license=self.license,
             language="en",
             files=[
                 dict(
@@ -271,8 +260,8 @@ class CurriculumType(object):
                                 menu_name=meta_section["menu_name"])
                                 for subsection in Section])
             else:
-                section = Section(page, filename=menu_filename, 
-                                    id_=meta_section["id"], menu_name=meta_section["menu_name"])
+                section = Section(page, filename=menu_filename, id_=meta_section["id"], 
+                                menu_name=meta_section["menu_name"])
             yield section
 
 
@@ -387,6 +376,7 @@ class Collection(object):
             self.source_id = source_id
             self.resource_url = url
             self.type = type
+            self.license = None
             
             if type == "MakerChallenges":
                 self.curriculum_type = MakerChallenge()
@@ -431,13 +421,13 @@ class Collection(object):
         LOGGER.info("   - URL: {}".format(self.resource_url))
         copy_page = copy.copy(self.page)
         cr = Copyright(copy_page)
-
+        self.license = get_license(licenses.CC_BY, copyright_holder=cr.get_copyright_info()).as_dict()
         topic_node = dict(
             kind=content_kinds.TOPIC,
             source_id=self.resource_url,
             title=self.title,
             description=self.description(),
-            license=get_license(licenses.CC_BY, copyright_holder=cr.get_copyright_info()).as_dict(),
+            license=self.license,
             children=[]
         )
 
@@ -450,13 +440,14 @@ class Collection(object):
             section.to_file(menu_filename, menu_index=menu_index)
 
         self.menu.check()
+        self.menu.license = self.license
         topic_node["children"].append(self.menu.info())
         #check for pdfs and videos on all page
         all_sections = CollectionSection(copy_page, resource_url=self.resource_url)
-        pdfs_info = all_sections.get_pdfs_info(self.source_id)
+        pdfs_info = all_sections.build_pdfs_info(self.source_id, self.license)
         if pdfs_info is not None:
             topic_node["children"].append(pdfs_info)
-        videos_info = all_sections.get_videos_info(self.source_id)
+        videos_info = all_sections.build_videos_info(self.source_id, self.license)
         if videos_info is not None:
             topic_node["children"].append(videos_info)
         channel_tree["children"].append(topic_node)
@@ -522,7 +513,7 @@ class CollectionSection(object):
                     urls[link["href"]] = (name, urljoin(BASE_URL, link["href"]))
             return urls.values()
 
-    def get_pdfs_info(self, source_id):
+    def build_pdfs_info(self, source_id, license=None):
         pdfs_urls = self.get_pdfs()
         if len(pdfs_urls) == 0:
             return
@@ -530,12 +521,12 @@ class CollectionSection(object):
         PDFS_DATA_DIR = build_path(["chefdata", 'pdfs', source_id])
         info = dict(
             kind=content_kinds.TOPIC,
-            source_id=self.resource_url,
+            source_id="sourceid:"+PDFS_DATA_DIR,
             title="Files",
             description='',
             children=[],
             language="en",
-            license="")
+            license=license)
 
         for name, pdf_url in pdfs_urls:
             try:
@@ -553,7 +544,7 @@ class CollectionSection(object):
                         path=pdf_filepath
                     )],
                     language="en",
-                    license="")
+                    license=license)
                 info["children"].append(files)
             except requests.exceptions.HTTPError as e:
                 LOGGER.info("Error: {}".format(e))
@@ -614,7 +605,7 @@ class CollectionSection(object):
                 num_tries = 0
         return urls
 
-    def get_videos_info(self, source_id):
+    def build_videos_info(self, source_id, license=None):
         videos_urls = self.get_videos_urls()
         if len(videos_urls) == 0:
             return
@@ -622,12 +613,12 @@ class CollectionSection(object):
         VIDEOS_DATA_DIR = build_path(["chefdata", 'videos', source_id])
         info = dict(
             kind=content_kinds.TOPIC,
-            source_id=self.resource_url,
+            source_id="sourceid:"+VIDEOS_DATA_DIR,
             title="Videos",
             description='',
             children=[],
             language="en",
-            license="")
+            license=license)
 
         for i, url in enumerate(videos_urls):
             resource = YouTubeResource(url)
@@ -953,14 +944,14 @@ class TeachEngineeringChef(JsonTreeChef):
         channel_tree = self._build_scraping_json_tree(web_resource_tree)
         scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
                                 TeachEngineeringChef.SCRAPING_STAGE_OUTPUT)
-        #write_tree_to_json_tree(scrape_stage, channel_tree)
+        write_tree_to_json_tree(scrape_stage, channel_tree)
  
     def _build_scraping_json_tree(self, web_resource_tree):
         channel_tree = dict(
             source_domain=TeachEngineeringChef.HOSTNAME,
             source_id='teachengineering',
             title='TeachEngineering',
-            description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms.""",
+            description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 characters is the MAX LIMIT
             thumbnail='https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png',
             language='en',
             children=[],
@@ -979,13 +970,5 @@ class TeachEngineeringChef(JsonTreeChef):
 # CLI: This code will run when `souschef.py` is called on the command line
 ################################################################################
 if __name__ == '__main__':
-    # Open a writer to generate files
     chef = TeachEngineeringChef()
     chef.main()
-    #with data_writer.DataWriter(write_to_path=WRITE_TO_PATH) as writer:
-        # Write channel details to spreadsheet
-    #    thumbnail = writer.add_file(str(PATH), "Channel Thumbnail", CHANNEL_THUMBNAIL, write_data=False)
-    #    writer.add_channel(CHANNEL_NAME, CHANNEL_SOURCE_ID, CHANNEL_DOMAIN, CHANNEL_LANGUAGE, description=CHANNEL_DESCRIPTION, thumbnail=thumbnail)
-        # Scrape source content
-    #    scrape_source(writer)
-    #    sys.stdout.write("\n\nDONE: Zip created at {}\n".format(writer.write_to_path))
