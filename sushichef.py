@@ -797,9 +797,8 @@ class YouTubeResource(ResourceType):
         subs = []
         if 'subtitles' in video_info:
             subtitles_info = video_info["subtitles"]
-
-        for language in subtitles_info.keys():
-            subs.append(dict(file_type=SUBTITLES_FILE, youtube_id=video_id, language=language))
+            for language in subtitles_info.keys():
+                subs.append(dict(file_type=SUBTITLES_FILE, youtube_id=video_id, language=language))
         return subs
 
     def process_file(self, download=False, filepath=None):
