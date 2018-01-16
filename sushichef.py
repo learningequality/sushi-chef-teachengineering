@@ -68,12 +68,12 @@ def test():
         subtopic_name = "test"
         document = downloader.read(url, loadjs=False, session=sess)
         page = BeautifulSoup(document, 'html.parser')
-        collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip", 
+        collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip",
             source_id=url,
             type=collection_type)
         collection.to_file(PATH, [collection_type.lower()])
     except requests.exceptions.HTTPError as e:
-        LOGGER.info("Error: {}".format(e)) 
+        LOGGER.info("Error: {}".format(e))
 
 
 def check_subtitles(page):
@@ -87,7 +87,7 @@ def check_subtitles(page):
             with open("/tmp/subtitles.csv", 'a') as csv_file:
                 csv_writer = csv.writer(csv_file, delimiter=",")
                 csv_writer.writerow([url] + list(info["subtitles"].keys()))
-            
+
 
 class ResourceBrowser(object):
     def __init__(self, resource_url):
@@ -112,7 +112,7 @@ class ResourceBrowser(object):
                             k = k.strip().replace('"', "").replace("'", "")
                             v = v.strip().replace('"', "").replace("'", "")
                             if k in keys:
-                                azureSearchSettings[k] = v 
+                                azureSearchSettings[k] = v
                         except ValueError:
                             pass
             except IndexError:
@@ -143,7 +143,7 @@ class ResourceBrowser(object):
                 while len(queue) > 0:
                     resource = queue.pop(0)
                     url = self.build_resource_url(resource["id"], resource["collection"])
-                    yield dict(url=url, collection=resource["collection"],  
+                    yield dict(url=url, collection=resource["collection"],
                         spanishVersionId=resource["spanishVersionId"],
                         title=resource["title"], summary=resource["summary"],
                         grade_target=resource["gradeTarget"],
@@ -161,7 +161,7 @@ class Menu(object):
     """
         This class checks elements on the lesson menu and build the menu list
     """
-    def __init__(self, page, filepath=None, id_=None, exclude_titles=None, 
+    def __init__(self, page, filepath=None, id_=None, exclude_titles=None,
                 include_titles=None):
         self.body = page.find("div", id=id_)
         self.menu = OrderedDict()
@@ -236,7 +236,7 @@ class Menu(object):
                     path=self.filepath
                 )
             ]
-        ) 
+        )
 
 
 class CurriculumType(object):
@@ -244,11 +244,11 @@ class CurriculumType(object):
         for meta_section in self.sections:
             Section = meta_section["class"]
             if isinstance(Section, list):
-                section = sum([subsection(page, filename=menu_filename, 
+                section = sum([subsection(page, filename=menu_filename,
                                 menu_name=meta_section["menu_name"])
                                 for subsection in Section])
             else:
-                section = Section(page, filename=menu_filename, id_=meta_section["id"], 
+                section = Section(page, filename=menu_filename, id_=meta_section["id"],
                                 menu_name=meta_section["menu_name"])
             yield section
 
@@ -257,7 +257,7 @@ class Activity(CurriculumType):
     def __init__(self):
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
-            {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection], 
+            {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection],
             "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
@@ -356,16 +356,16 @@ class Collection(object):
             self.title = title#self.clean_title(self.page.find("span", class_="curriculum-title"))
             self.contribution_by = None
             filepath = build_path(['chefdata', 'menu', self.title])
-            self.filepath = "{path}/{source_id}.zip".format(path=filepath, 
+            self.filepath = "{path}/{source_id}.zip".format(path=filepath,
                 source_id=source_id)
-            self.menu = Menu(self.page, filepath=self.filepath, id_="CurriculumNav", 
+            self.menu = Menu(self.page, filepath=self.filepath, id_="CurriculumNav",
                 exclude_titles=["Attachments", "Comments"], include_titles=["Quick Look"])
             self.menu.add("Info")
             self.source_id = source_id
             self.resource_url = url
             self.type = type
             self.license = None
-            
+
             if type == "MakerChallenges":
                 self.curriculum_type = MakerChallenge()
             elif type == "Lessons":
@@ -661,7 +661,7 @@ class QuickLook(CollectionSection):
 
 
 class EngineeringConnection(CollectionSection):
-    def __init__(self, page, filename=None, id_="engineering_connection", 
+    def __init__(self, page, filename=None, id_="engineering_connection",
                 menu_name="engineering_connection"):
         super(EngineeringConnection, self).__init__(page, filename=filename,
                 id_=id_, menu_name=menu_name)
@@ -828,7 +828,7 @@ class YouTubeResource(ResourceType):
                 video = pafy.new(self.resource_url)
                 best = video.getbest(preftype="mp4")
                 video_filepath = best.download(filepath=download_to)
-            except (IOError, OSError, URLError, ConnectionResetError) as e:
+            except (ValueError, IOError, OSError, URLError, ConnectionResetError) as e:
                 LOGGER.info(e)
                 LOGGER.info("Download retry:"+str(try_number))
                 time.sleep(.8)
@@ -871,7 +871,7 @@ def remove_links(content):
 
 
 def check_shorter_url(url):
-    shorters_urls = set(["bitly.com", "goo.gl", "tinyurl.com", "ow.ly", "ls.gd", 
+    shorters_urls = set(["bitly.com", "goo.gl", "tinyurl.com", "ow.ly", "ls.gd",
                 "buff.ly", "adf.ly", "bit.do", "mcaf.ee"])
     index_init = url.find("://")
     index_end = url[index_init+3:].find("/")
@@ -912,7 +912,7 @@ class TeachEngineeringChef(JsonTreeChef):
             title='TeachEngineering',
             children=[]
         )
-        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,                     
+        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,
                                     TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
         curriculum_url = urljoin(TeachEngineeringChef.ROOT_URL.format(HOSTNAME=TeachEngineeringChef.HOSTNAME), "curriculum/browse")
         resource_browser = ResourceBrowser(curriculum_url)
@@ -923,17 +923,17 @@ class TeachEngineeringChef(JsonTreeChef):
         return web_resource_tree
 
     def scrape(self, args, options):
-        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
+        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,
                                 TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
         with open(crawling_stage, 'r') as f:
             web_resource_tree = json.load(f)
             assert web_resource_tree['kind'] == 'TeachEngineeringResourceTree'
 
         channel_tree = self._build_scraping_json_tree(web_resource_tree)
-        scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
+        scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,
                                 TeachEngineeringChef.SCRAPING_STAGE_OUTPUT)
         write_tree_to_json_tree(scrape_stage, channel_tree)
- 
+
     def _build_scraping_json_tree(self, web_resource_tree):
         channel_tree = dict(
             source_domain=TeachEngineeringChef.HOSTNAME,
