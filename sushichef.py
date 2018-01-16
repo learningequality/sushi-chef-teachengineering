@@ -1142,7 +1142,7 @@ class YouTubeResource(ResourceType):
                 video = pafy.new(self.resource_url)
                 best = video.getbest(preftype="mp4")
                 video_filepath = best.download(filepath=download_to)
-            except (URLError, ConnectionResetError) as e:
+            except (IOError, OSError, URLError, ConnectionResetError) as e:
                 LOGGER.info(e)
                 LOGGER.info("Download retry:"+str(try_number))
                 time.sleep(.8)
