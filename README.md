@@ -39,7 +39,7 @@ The zip archive can then be imported into Kolibri Studio using a LineCook script
 
 ## Usage
 
-      ./souschef.py
+      ./run.sh
 
 
 
