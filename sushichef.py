@@ -132,7 +132,7 @@ class ResourceBrowser(object):
             data = req.json()
             try:
                 num_registers = data["@odata.count"]
-                #num_registers = 15
+                #num_registers = 1565
             except KeyError:
                 LOGGER.info("The json object is bad formed: {}".format(data))
                 LOGGER.info("retry...")
@@ -571,7 +571,7 @@ class CollectionSection(object):
                 else:
                     url = a["href"]
                 if YouTubeResource.is_youtube(url, get_channel=False):
-                    urls.add(url)
+                    urls.add(url.strip())
             except requests.exceptions.MissingSchema:
                 pass
             except requests.exceptions.TooManyRedirects:
@@ -766,7 +766,7 @@ class YouTubeResource(ResourceType):
     @classmethod
     def transform_embed(self, url):
         url = "".join(url.split("?")[:1])
-        return url.replace("embed/", "watch?v=")
+        return url.replace("embed/", "watch?v=").strip()
 
     def get_video_info(self):
         ydl_options = {
