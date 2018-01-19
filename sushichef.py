@@ -131,8 +131,8 @@ class ResourceBrowser(object):
             req = requests.get(url)
             data = req.json()
             try:
-                #num_registers = data["@odata.count"]
-                num_registers = 10
+                num_registers = data["@odata.count"]
+                #num_registers = 4
             except KeyError:
                 LOGGER.info("The json object is bad formed: {}".format(data))
                 LOGGER.info("retry...")
@@ -167,12 +167,13 @@ class Menu(object):
         This class checks elements on the lesson menu and build the menu list
     """
     def __init__(self, page, filepath=None, id_=None, exclude_titles=None, 
-                include_titles=None):
+                include_titles=None, lang="en"):
         self.body = page.find("div", id=id_)
         self.menu = OrderedDict()
         self.filepath = filepath
         self.exclude_titles = [] if exclude_titles is None else exclude_titles
         self.license = None
+        self.lang = lang
         if include_titles is not None:
             for title_id, title_text in include_titles:
                 self.add(title_id, title_text)
@@ -239,28 +240,28 @@ class Menu(object):
             title="Menu Index",
             description="",
             license=self.license,
-            language="en",
+            language=self.lang,
             files=[
                 dict(
                     file_type=content_kinds.HTML5,
-                    path=self.filepath
+                    path=os.path.join("./", self.filepath)
                 )
             ]
         ) 
 
 
 class CurriculumType(object):
-     def render(self, page, menu_filename):
+     def render(self, page, menu_filename, lang="en"):
         for meta_section in self.sections:
             Section = meta_section["class"]
             if isinstance(Section, list):
                 section = sum([subsection(page, filename=menu_filename, 
-                                menu_name=meta_section["menu_name"])
+                                menu_name=meta_section["menu_name"], lang=lang)
                                 for subsection in Section])
                 section.id = meta_section["id"] 
             else:
                 section = Section(page, filename=menu_filename, id_=meta_section["id"], 
-                                menu_name=meta_section["menu_name"])
+                                menu_name=meta_section["menu_name"], lang=lang)
             yield section
 
 
@@ -361,7 +362,7 @@ class MakerChallenge(CurriculumType):
 
 
 class Collection(object):
-    def __init__(self, url, source_id, type, title):
+    def __init__(self, url, source_id, type, title, lang):
         self.page = self.download_page(url)
         if self.page is not False:
             self.title_prefix = self.clean_title(self.page.find("span", class_="title-prefix"))
@@ -374,12 +375,14 @@ class Collection(object):
                 source_id=source_id)
             self.menu = Menu(self.page, filepath=self.filepath, id_="CurriculumNav", 
                 exclude_titles=["attachments", "comments"], 
-                include_titles=[("quick", "Quick Look")])
+                include_titles=[("quick", "Quick Look")],
+                lang=lang)
             self.menu.add("info", "Info")
             self.source_id = source_id
             self.resource_url = url
             self.type = type
             self.license = None
+            self.lang = lang
             
             if type == "MakerChallenges":
                 self.curriculum_type = MakerChallenge()
@@ -421,7 +424,7 @@ class Collection(object):
 
     def drop_null_sections(self):
         sections = []
-        for section in self.curriculum_type.render(self.page, self.menu.filepath):
+        for section in self.curriculum_type.render(self.page, self.menu.filepath, lang=self.lang):
             if section.body is None:
                 self.menu.remove(section.id)
             else:
@@ -456,7 +459,7 @@ class Collection(object):
         self.menu.license = self.license
         topic_node["children"].append(self.menu.info())
         #check for pdfs and videos on all page
-        all_sections = CollectionSection(copy_page, resource_url=self.resource_url)
+        all_sections = CollectionSection(copy_page, resource_url=self.resource_url, lang=self.lang)
         pdfs_info = all_sections.build_pdfs_info(self.source_id, self.license)
         if pdfs_info is not None:
             topic_node["children"].append(pdfs_info)
@@ -465,12 +468,10 @@ class Collection(object):
             topic_node["children"].append(videos_info)
         channel_tree["children"].append(topic_node)
 
-    #def rm(self, filepath):
-    #    os.remove(filepath)
-
 
 class CollectionSection(object):
-    def __init__(self,  page, filename=None, id_=None, menu_name=None, resource_url=None):
+    def __init__(self,  page, filename=None, id_=None, menu_name=None, resource_url=None,
+                lang="en"):
         LOGGER.debug(id_)
         self.id = id_
         if id_ is None:
@@ -487,6 +488,7 @@ class CollectionSection(object):
         self.filename = filename
         self.menu_name = menu_name
         self.resource_url = resource_url
+        self.lang = lang
 
     def __add__(self, o):
         if isinstance(self.body, Tag) and isinstance(o.body, Tag):
@@ -534,11 +536,11 @@ class CollectionSection(object):
         PDFS_DATA_DIR = build_path(["chefdata", 'pdfs', source_id])
         info = dict(
             kind=content_kinds.TOPIC,
-            source_id="sourceid:"+PDFS_DATA_DIR,
+            source_id=PDFS_DATA_DIR,
             title="Files",
             description='',
             children=[],
-            language="en",
+            language=self.lang,
             license=license)
 
         for name, pdf_url in pdfs_urls:
@@ -554,9 +556,9 @@ class CollectionSection(object):
                     description='',
                     files=[dict(
                         file_type=content_kinds.DOCUMENT,
-                        path=pdf_filepath
+                        path=os.path.join("./", pdf_filepath)
                     )],
-                    language="en",
+                    language=self.lang,
                     license=license)
                 info["children"].append(files)
             except requests.exceptions.HTTPError as e:
@@ -626,15 +628,15 @@ class CollectionSection(object):
         VIDEOS_DATA_DIR = build_path(["chefdata", 'videos', source_id])
         info = dict(
             kind=content_kinds.TOPIC,
-            source_id="sourceid:"+VIDEOS_DATA_DIR,
+            source_id=VIDEOS_DATA_DIR,
             title="Videos",
             description='',
             children=[],
-            language="en",
+            language=self.lang,
             license=license)
 
         for i, url in enumerate(videos_urls):
-            resource = YouTubeResource(url)
+            resource = YouTubeResource(url, lang=self.lang)
             resource.to_file(filepath=VIDEOS_DATA_DIR)
             if resource.resource_file is not None:
                 info["children"].append(resource.resource_file)
@@ -663,7 +665,7 @@ class CollectionSection(object):
 
 
 class CurriculumHeader(CollectionSection):
-    def __init__(self, page, filename=None, id_="curriculum-header", menu_name="summary"):
+    def __init__(self, page, filename=None, id_="curriculum-header", menu_name="summary", lang="en"):
         self.body = page.find("div", class_="curriculum-header")
         self.filename = filename
         self.menu_name = menu_name
@@ -672,9 +674,9 @@ class CurriculumHeader(CollectionSection):
 
 
 class QuickLook(CollectionSection):
-     def __init__(self, page, filename=None, id_="quick", menu_name="quick_look"):
+     def __init__(self, page, filename=None, id_="quick", menu_name="quick_look", lang="en"):
         super(QuickLook, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
         self.body = page.find("div", class_="quick-look")
         ## cleaning html code
         for s in self.body.find_all("script"):
@@ -687,59 +689,59 @@ class QuickLook(CollectionSection):
 
 class EngineeringConnection(CollectionSection):
     def __init__(self, page, filename=None, id_="engineering_connection", 
-                menu_name="engineering_connection"):
+                menu_name="engineering_connection", lang="en"):
         super(EngineeringConnection, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Engineering Connection\s*")))
 
 
 class Summary(CollectionSection):
-    def __init__(self, page, filename=None, id_="summary", menu_name="summary"):
+    def __init__(self, page, filename=None, id_="summary", menu_name="summary", lang="en"):
         super(Summary, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
 
 
 class Introduction(CollectionSection):
-    def __init__(self, page, filename=None, id_="intro", menu_name="introduction"):
+    def __init__(self, page, filename=None, id_="intro", menu_name="introduction", lang="en"):
         super(Introduction, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
 
 
 class Attachments(CollectionSection):
-    def __init__(self, page, filename=None, id_="attachments", menu_name="attachments"):
+    def __init__(self, page, filename=None, id_="attachments", menu_name="attachments", lang="en"):
         super(Attachments, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
 
 
 class Contributors(CollectionSection):
-    def __init__(self, page, filename=None, id_="contributors", menu_name="contributors"):
+    def __init__(self, page, filename=None, id_="contributors", menu_name="contributors", lang="en"):
         super(Contributors, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Contributors\s*")))
 
 
 class SupportingProgram(CollectionSection):
-    def __init__(self, page, filename=None, id_="supporting_program", menu_name="supporting_program"):
+    def __init__(self, page, filename=None, id_="supporting_program", menu_name="supporting_program", lang="en"):
         super(SupportingProgram, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Supporting Program\s*")))
 
 
 class Acknowledgements(CollectionSection):
-    def __init__(self, page, filename=None, id_="acknowledgements", menu_name="acknowledgements"):
+    def __init__(self, page, filename=None, id_="acknowledgements", menu_name="acknowledgements", lang="en"):
         super(Acknowledgements, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Acknowledgements\s*")))
 
 
 class Copyright(CollectionSection):
-    def __init__(self, page, filename=None, id_="copyright", menu_name="copyright"):
+    def __init__(self, page, filename=None, id_="copyright", menu_name="copyright", lang="en"):
         super(Copyright, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name)
+                id_=id_, menu_name=menu_name, lang=lang)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Copyright\s*")))
 
@@ -771,10 +773,11 @@ class ResourceType(object):
 
 
 class YouTubeResource(ResourceType):
-    def __init__(self, resource_url, type_name="Youtube"):
+    def __init__(self, resource_url, type_name="Youtube", lang="en"):
         super(YouTubeResource, self).__init__(type_name=type_name)
         self.resource_url = self.clean_url(resource_url)
         self.file_format = file_formats.MP4
+        self.lang = lang
 
     def clean_url(self, url):
         if url[-1] == "/":
@@ -832,7 +835,7 @@ class YouTubeResource(ResourceType):
             video_filepath = None
 
         if video_filepath is not None:
-            files = [dict(file_type=content_kinds.VIDEO, path=video_filepath)]
+            files = [dict(file_type=content_kinds.VIDEO, path=os.path.join("./", video_filepath))]
             files += self.subtitles_dict()
 
             self.add_resource_file(dict(
@@ -841,7 +844,7 @@ class YouTubeResource(ResourceType):
                 title=get_name_from_url_no_ext(video_filepath),
                 description='',
                 files=files,
-                language="en",
+                language=self.lang,
                 license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()))
 
     #youtubedl has some troubles downloading videos in youtube,
@@ -927,13 +930,14 @@ class TeachEngineeringChef(JsonTreeChef):
     CRAWLING_STAGE_OUTPUT = 'web_resource_tree.json'
     SCRAPING_STAGE_OUTPUT = 'ricecooker_json_tree.json'
     LICENSE = get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()
+    THUMBNAIL = 'https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png'
 
     def __init__(self):
         build_path([TeachEngineeringChef.TREES_DATA_DIR])
         super(TeachEngineeringChef, self).__init__()
 
     def pre_run(self, args, options):
-        self.crawl(args, options)
+        #self.crawl(args, options)
         self.scrape(args, options)
 
     def crawl(self, args, options):
@@ -952,26 +956,38 @@ class TeachEngineeringChef(JsonTreeChef):
             json.dump(web_resource_tree, f, indent=2)
         return web_resource_tree
 
+    def save_thumbnail(self):
+        THUMB_DATA_DIR = build_path(["chefdata", 'thumbnail'])
+        filepath = os.path.join(THUMB_DATA_DIR, "TELogoNew.png")
+        document = downloader.read(TeachEngineeringChef.THUMBNAIL, loadjs=False, session=sess)        
+        with open(filepath, 'wb') as f:
+            f.write(document)
+        return os.path.join("./", filepath)
+
     def scrape(self, args, options):
         crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
                                 TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
         with open(crawling_stage, 'r') as f:
             web_resource_tree = json.load(f)
             assert web_resource_tree['kind'] == 'TeachEngineeringResourceTree'
-
-        channel_tree = self._build_scraping_json_tree(web_resource_tree)
+         
+        if 'lang' in options and options['lang'] == 'es':
+            channel_tree = self._build_scraping_json_tree_es(web_resource_tree)
+        else:
+            channel_tree = self._build_scraping_json_tree(web_resource_tree)
         scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
                                 TeachEngineeringChef.SCRAPING_STAGE_OUTPUT)
         write_tree_to_json_tree(scrape_stage, channel_tree)
  
     def _build_scraping_json_tree(self, web_resource_tree):
+        LANG = 'en'
         channel_tree = dict(
             source_domain=TeachEngineeringChef.HOSTNAME,
             source_id='teachengineering',
             title='TeachEngineering',
             description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
-            thumbnail='https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png',
-            language='en',
+            thumbnail=self.save_thumbnail(),
+            language=LANG,
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
@@ -979,65 +995,21 @@ class TeachEngineeringChef(JsonTreeChef):
             collection = Collection(resource["url"],
                             source_id=resource["id"],
                             type=resource["collection"],
-                            title=resource["title"])
+                            title=resource["title"],
+                            lang=LANG)
             collection.to_file(channel_tree)
+            break
         return channel_tree
 
-
-class TeachEngineeringEsChef(JsonTreeChef):
-    ROOT_URL = "https://{HOSTNAME}"
-    HOSTNAME = "teachengineering.org"
-    DATA_DIR = "chefdata"
-    TREES_DATA_DIR = os.path.join(DATA_DIR, 'trees')
-    CRAWLING_STAGE_OUTPUT = 'web_resource_tree.json'
-    SCRAPING_STAGE_OUTPUT = 'ricecooker_json_tree.json'
-    LICENSE = get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()
-
-    def __init__(self):
-        build_path([TeachEngineeringChef.TREES_DATA_DIR])
-        super(TeachEngineeringEsChef, self).__init__()
-
-    def pre_run(self, args, options):
-        self.crawl(args, options)
-        self.scrape(args, options)
-
-    def crawl(self, args, options):
-        web_resource_tree = dict(
-            kind='TeachEngineeringResourceTree',
-            title='TeachEngineering (Spanish)',
-            children=[]
-        )
-        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,                     
-                                    TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
-        curriculum_url = urljoin(TeachEngineeringChef.ROOT_URL.format(HOSTNAME=TeachEngineeringChef.HOSTNAME), "curriculum/browse")
-        resource_browser = ResourceBrowser(curriculum_url)
-        for data in resource_browser.run():
-            if data["spanishVersionId"] is not None:
-                web_resource_tree["children"].append(data)
-        with open(crawling_stage, 'w') as f:
-            json.dump(web_resource_tree, f, indent=2)
-        return web_resource_tree
-
-    def scrape(self, args, options):
-        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
-                                TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
-        with open(crawling_stage, 'r') as f:
-            web_resource_tree = json.load(f)
-            assert web_resource_tree['kind'] == 'TeachEngineeringResourceTree'
-
-        channel_tree = self._build_scraping_json_tree(web_resource_tree)
-        scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
-                                TeachEngineeringChef.SCRAPING_STAGE_OUTPUT)
-        write_tree_to_json_tree(scrape_stage, channel_tree)
-
-    def _build_scraping_json_tree(self, web_resource_tree):
+    def _build_scraping_json_tree_es(self, web_resource_tree):
+        LANG = 'es'
         channel_tree = dict(
             source_domain=TeachEngineeringChef.HOSTNAME,
             source_id='teachengineering',
-            title='TeachEngineering (Spanish)',
+            title='TeachEngineering (es)',
             description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
-            thumbnail='https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png',
-            language='es',
+            thumbnail=self.save_thumbnail(),
+            language=LANG,
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
@@ -1046,7 +1018,8 @@ class TeachEngineeringEsChef(JsonTreeChef):
                 collection = Collection(resource["url_es"],
                         source_id=resource["spanishVersionId"],
                         type=resource["collection"],
-                        title=resource["title"])
+                        title=resource["title"],
+                        lang=LANG)
                 collection.to_file(channel_tree)
         return channel_tree
 
