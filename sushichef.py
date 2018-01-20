@@ -43,14 +43,16 @@ DOWNLOAD_VIDEOS = False
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .1
 
+DATA_DIR = "chefdata"
+
 # webcache
 ###############################################################
 sess = requests.Session()
-#cache = FileCache('.webcache')
-#basic_adapter = CacheControlAdapter(cache=cache)
-#forever_adapter = CacheControlAdapter(heuristic=CacheForeverHeuristic(), cache=cache)
-#sess.mount('http://', basic_adapter)
-#sess.mount(BASE_URL, forever_adapter)
+cache = FileCache('.webcache')
+basic_adapter = CacheControlAdapter(cache=cache)
+forever_adapter = CacheControlAdapter(heuristic=CacheForeverHeuristic(), cache=cache)
+sess.mount('http://', basic_adapter)
+sess.mount(BASE_URL, forever_adapter)
 
 # Main Scraping Method
 ################################################################################
@@ -70,7 +72,8 @@ def test():
         page = BeautifulSoup(document, 'html.parser')
         collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip", 
             source_id=url,
-            type=collection_type)
+            type=collection_type,
+            lang="en")
         collection.to_file(PATH, [collection_type.lower()])
     except requests.exceptions.HTTPError as e:
         LOGGER.info("Error: {}".format(e)) 
@@ -244,7 +247,7 @@ class Menu(object):
             files=[
                 dict(
                     file_type=content_kinds.HTML5,
-                    path=os.path.join("./", self.filepath)
+                    path=self.filepath
                 )
             ]
         ) 
@@ -370,14 +373,6 @@ class Collection(object):
             if self.title is None:
                 self.title = title
             self.contribution_by = None
-            filepath = build_path(['chefdata', 'menu'])
-            self.filepath = "{path}/{source_id}.zip".format(path=filepath, 
-                source_id=source_id)
-            self.menu = Menu(self.page, filepath=self.filepath, id_="CurriculumNav", 
-                exclude_titles=["attachments", "comments"], 
-                include_titles=[("quick", "Quick Look")],
-                lang=lang)
-            self.menu.add("info", "Info")
             self.source_id = source_id
             self.resource_url = url
             self.type = type
@@ -422,14 +417,24 @@ class Collection(object):
             text = title.text.replace("\t", " ")
             return text.strip()
 
-    def drop_null_sections(self):
+    def drop_null_sections(self, menu):
         sections = []
-        for section in self.curriculum_type.render(self.page, self.menu.filepath, lang=self.lang):
+        for section in self.curriculum_type.render(self.page, menu.filepath, lang=self.lang):
             if section.body is None:
-                self.menu.remove(section.id)
+                menu.remove(section.id)
             else:
                 sections.append(section)
         return sections
+
+    def info(self):
+        return dict(
+                kind=content_kinds.TOPIC,
+                source_id=self.type,
+                title=self.type,
+                description="",
+                license=self.license,
+                children=[]
+            )
 
     def to_file(self, channel_tree):
         LOGGER.info(" + [{}]: {}".format(self.type, self.title))
@@ -437,36 +442,75 @@ class Collection(object):
         copy_page = copy.copy(self.page)
         cr = Copyright(copy_page)
         self.license = get_license(licenses.CC_BY, copyright_holder=cr.get_copyright_info()).as_dict()
-        topic_node = dict(
-            kind=content_kinds.TOPIC,
-            source_id=self.resource_url,
-            title=self.title,
-            description=self.description(),
-            license=self.license,
-            children=[]
-        )
 
-        sections = self.drop_null_sections()
+        ql = QuickLook(copy_page)
+        subjects_area = ql.get_subject_area()
+
+        base_path = build_path([DATA_DIR, self.type, self.source_id])
+        filepath = "{path}/{source_id}.zip".format(path=base_path, 
+            source_id=self.source_id)
+        menu = Menu(self.page, filepath=filepath, id_="CurriculumNav", 
+            exclude_titles=["attachments", "comments"], 
+            include_titles=[("quick", "Quick Look")],
+            lang=self.lang)
+        menu.add("info", "Info")
+
+        sections = self.drop_null_sections(menu)
         #build the menu index
-        self.menu.to_file()
+        menu.to_file()
         #set section's html files to the menu
         for section in sections:
-            menu_filename = self.menu.set_section(section)
-            menu_index = self.menu.to_html(directory="", active_li=menu_filename)
+            menu_filename = menu.set_section(section)
+            menu_index = menu.to_html(directory="", active_li=menu_filename)
             section.to_file(menu_filename, menu_index=menu_index)
 
-        self.menu.check()
-        self.menu.license = self.license
-        topic_node["children"].append(self.menu.info())
+        menu.check()
+        menu.license = self.license
+
         #check for pdfs and videos on all page
         all_sections = CollectionSection(copy_page, resource_url=self.resource_url, lang=self.lang)
-        pdfs_info = all_sections.build_pdfs_info(self.source_id, self.license)
-        if pdfs_info is not None:
-            topic_node["children"].append(pdfs_info)
-        videos_info = all_sections.build_videos_info(self.source_id, self.license)
-        if videos_info is not None:
-            topic_node["children"].append(videos_info)
-        channel_tree["children"].append(topic_node)
+        pdfs_info = all_sections.build_pdfs_info(base_path, self.license)
+        videos_info = all_sections.build_videos_info(base_path, self.license)
+
+        for subject_area in subjects_area:
+            subject_area_topic_node = get_level_map(channel_tree, [subject_area])
+            if subject_area_topic_node is None:
+                subject_area_topic_node = dict(
+                    kind=content_kinds.TOPIC,
+                    source_id=subject_area,
+                    title=subject_area,
+                    description="",
+                    license=self.license,
+                    children=[]
+                )
+                channel_tree["children"].append(subject_area_topic_node)
+
+            topic_node = get_level_map(channel_tree, [subject_area, self.type])
+            #print(subject_area, self.type)
+            #print(topic_node)
+            if topic_node is None:
+                topic_node = self.info()
+                subject_area_topic_node["children"].append(topic_node)                
+
+            topic_node["children"].append(menu.info())
+            if pdfs_info is not None:
+                topic_node["children"].append(pdfs_info)
+            if videos_info is not None:
+                topic_node["children"].append(videos_info)
+
+
+def get_level_map(tree, levels):
+    actual_node = levels[0]
+    r_levels = levels[1:]
+    for children in tree["children"]:
+        #print("IN", children["source_id"], ", ", actual_node)
+        if children["source_id"] == actual_node:
+            if len(r_levels) >= 1:
+                return get_level_map(children, r_levels)
+            else:
+                return children
+            #if node is not None:
+            #    return node
 
 
 class CollectionSection(object):
@@ -528,12 +572,12 @@ class CollectionSection(object):
                     urls[link["href"]] = (name, urljoin(BASE_URL, link["href"]))
             return urls.values()
 
-    def build_pdfs_info(self, source_id, license=None):
+    def build_pdfs_info(self, path, license=None):
         pdfs_urls = self.get_pdfs()
         if len(pdfs_urls) == 0:
             return
 
-        PDFS_DATA_DIR = build_path(["chefdata", 'pdfs', source_id])
+        PDFS_DATA_DIR = build_path([path, 'pdfs'])
         info = dict(
             kind=content_kinds.TOPIC,
             source_id=PDFS_DATA_DIR,
@@ -556,7 +600,7 @@ class CollectionSection(object):
                     description='',
                     files=[dict(
                         file_type=content_kinds.DOCUMENT,
-                        path=os.path.join("./", pdf_filepath)
+                        path=pdf_filepath
                     )],
                     language=self.lang,
                     license=license)
@@ -620,12 +664,12 @@ class CollectionSection(object):
                 num_tries = 0
         return urls
 
-    def build_videos_info(self, source_id, license=None):
+    def build_videos_info(self, path, license=None):
         videos_urls = self.get_videos_urls()
         if len(videos_urls) == 0:
             return
 
-        VIDEOS_DATA_DIR = build_path(["chefdata", 'videos', source_id])
+        VIDEOS_DATA_DIR = build_path([path, 'videos'])
         info = dict(
             kind=content_kinds.TOPIC,
             source_id=VIDEOS_DATA_DIR,
@@ -674,7 +718,7 @@ class CurriculumHeader(CollectionSection):
 
 
 class QuickLook(CollectionSection):
-     def __init__(self, page, filename=None, id_="quick", menu_name="quick_look", lang="en"):
+    def __init__(self, page, filename=None, id_="quick", menu_name="quick_look", lang="en"):
         super(QuickLook, self).__init__(page, filename=filename,
                 id_=id_, menu_name=menu_name, lang=lang)
         self.body = page.find("div", class_="quick-look")
@@ -685,6 +729,13 @@ class QuickLook(CollectionSection):
             b.extract()
         div = self.body.find("div", id="PrintShareModal")
         div.extract()
+
+    def get_subject_area(self):
+        subject_areas = self.body.find_all(lambda tag: tag.name == 'a' and tag.findParent("dd", class_="subject-area"))
+        subjects = []
+        for a in subject_areas:
+            subjects.append(a.text)
+        return subjects
 
 
 class EngineeringConnection(CollectionSection):
@@ -835,7 +886,7 @@ class YouTubeResource(ResourceType):
             video_filepath = None
 
         if video_filepath is not None:
-            files = [dict(file_type=content_kinds.VIDEO, path=os.path.join("./", video_filepath))]
+            files = [dict(file_type=content_kinds.VIDEO, path=video_filepath)]
             files += self.subtitles_dict()
 
             self.add_resource_file(dict(
@@ -925,10 +976,9 @@ def build_path(levels):
 class TeachEngineeringChef(JsonTreeChef):
     ROOT_URL = "https://{HOSTNAME}"
     HOSTNAME = "teachengineering.org"
-    DATA_DIR = "chefdata"
     TREES_DATA_DIR = os.path.join(DATA_DIR, 'trees')
-    CRAWLING_STAGE_OUTPUT = 'web_resource_tree.json'
-    SCRAPING_STAGE_OUTPUT = 'ricecooker_json_tree.json'
+    CRAWLING_STAGE_OUTPUT_TPL = 'web_resource_tree_{}.json'
+    SCRAPING_STAGE_OUTPUT_TPL = 'ricecooker_json_tree_{}.json'
     LICENSE = get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()
     THUMBNAIL = 'https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png'
 
@@ -939,6 +989,7 @@ class TeachEngineeringChef(JsonTreeChef):
     def pre_run(self, args, options):
         #self.crawl(args, options)
         self.scrape(args, options)
+        pass
 
     def crawl(self, args, options):
         web_resource_tree = dict(
@@ -946,8 +997,9 @@ class TeachEngineeringChef(JsonTreeChef):
             title='TeachEngineering',
             children=[]
         )
+        lang = options.get('lang', 'en')
         crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,                     
-                                    TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
+                                    TeachEngineeringChef.CRAWLING_STAGE_OUTPUT_TPL.format(lang))
         curriculum_url = urljoin(TeachEngineeringChef.ROOT_URL.format(HOSTNAME=TeachEngineeringChef.HOSTNAME), "curriculum/browse")
         resource_browser = ResourceBrowser(curriculum_url)
         for data in resource_browser.run():
@@ -957,28 +1009,39 @@ class TeachEngineeringChef(JsonTreeChef):
         return web_resource_tree
 
     def save_thumbnail(self):
-        THUMB_DATA_DIR = build_path(["chefdata", 'thumbnail'])
+        THUMB_DATA_DIR = build_path([DATA_DIR, 'thumbnail'])
         filepath = os.path.join(THUMB_DATA_DIR, "TELogoNew.png")
         document = downloader.read(TeachEngineeringChef.THUMBNAIL, loadjs=False, session=sess)        
         with open(filepath, 'wb') as f:
             f.write(document)
-        return os.path.join("./", filepath)
+        return filepath
 
     def scrape(self, args, options):
+        lang = options.get('lang', 'en')
         crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
-                                TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
+                                TeachEngineeringChef.CRAWLING_STAGE_OUTPUT_TPL.format(lang))
         with open(crawling_stage, 'r') as f:
             web_resource_tree = json.load(f)
             assert web_resource_tree['kind'] == 'TeachEngineeringResourceTree'
          
-        if 'lang' in options and options['lang'] == 'es':
+        if lang == 'es':
             channel_tree = self._build_scraping_json_tree_es(web_resource_tree)
         else:
             channel_tree = self._build_scraping_json_tree(web_resource_tree)
+        
+        self.write_tree_to_json(channel_tree, lang)
+
+    def write_tree_to_json(self, channel_tree, lang):
         scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
-                                TeachEngineeringChef.SCRAPING_STAGE_OUTPUT)
+                                TeachEngineeringChef.SCRAPING_STAGE_OUTPUT_TPL.format(lang))
         write_tree_to_json_tree(scrape_stage, channel_tree)
- 
+
+    def get_json_tree_path(self, **kwargs):
+        lang = kwargs.get('lang', "en")
+        json_tree_path = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
+                    TeachEngineeringChef.SCRAPING_STAGE_OUTPUT_TPL.format(lang))
+        return json_tree_path
+
     def _build_scraping_json_tree(self, web_resource_tree):
         LANG = 'en'
         channel_tree = dict(
@@ -991,6 +1054,7 @@ class TeachEngineeringChef(JsonTreeChef):
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
+        counter = 0
         for resource in web_resource_tree["children"]:
             collection = Collection(resource["url"],
                             source_id=resource["id"],
@@ -998,14 +1062,16 @@ class TeachEngineeringChef(JsonTreeChef):
                             title=resource["title"],
                             lang=LANG)
             collection.to_file(channel_tree)
-            break
+            if counter == 10:
+                break
+            counter += 1
         return channel_tree
 
     def _build_scraping_json_tree_es(self, web_resource_tree):
         LANG = 'es'
         channel_tree = dict(
             source_domain=TeachEngineeringChef.HOSTNAME,
-            source_id='teachengineering',
+            source_id='teachengineering_es',
             title='TeachEngineering (es)',
             description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
             thumbnail=self.save_thumbnail(),
@@ -1021,6 +1087,7 @@ class TeachEngineeringChef(JsonTreeChef):
                         title=resource["title"],
                         lang=LANG)
                 collection.to_file(channel_tree)
+                break
         return channel_tree
 
 
