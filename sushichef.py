@@ -236,14 +236,15 @@ class Menu(object):
             if values["section"] is None:
                 raise Exception("{} is not linked to a section".format(name))
 
-    def info(self):
+    def info(self, thumbnail, description):
         return dict(
             kind=content_kinds.HTML5,
             source_id=self.filepath,
             title="Menu Index",
-            description="",
+            description=description,
             license=self.license,
             language=self.lang,
+            thumbnail=thumbnail,
             files=[
                 dict(
                     file_type=content_kinds.HTML5,
@@ -426,7 +427,8 @@ class Collection(object):
                 sections.append(section)
         return sections
 
-    def info(self):
+    ##activities, lessons, etc
+    def topic_info(self):
         return dict(
                 kind=content_kinds.TOPIC,
                 source_id=self.type,
@@ -435,6 +437,29 @@ class Collection(object):
                 license=self.license,
                 children=[]
             )
+
+    ##curriculum title
+    def info(self, thumbnail):
+        return dict(
+                kind=content_kinds.TOPIC,
+                source_id=self.resource_url,
+                title=self.title,
+                thumbnail=thumbnail,
+                description=self.description(),
+                license=self.license,
+                children=[]
+            )
+
+    def get_thumbnail(self, sections):
+        thumbnail_img = None
+        for section in sections:
+            if section.id == "summary" or section.id == "intro":
+                if section.img_url is not None:
+                    ext = section.img_url.split(".")[-1]
+                    if ext in ['jpg', 'jpeg', 'png']:
+                        thumbnail_img = section.img_url #section summary or introduction
+                break
+        return thumbnail_img
 
     def to_file(self, channel_tree):
         LOGGER.info(" + [{}]: {}".format(self.type, self.title))
@@ -486,31 +511,32 @@ class Collection(object):
                 channel_tree["children"].append(subject_area_topic_node)
 
             topic_node = get_level_map(channel_tree, [subject_area, self.type])
-            #print(subject_area, self.type)
-            #print(topic_node)
+            thumbnail_img = self.get_thumbnail(sections)
+            curriculum_info = self.info(thumbnail_img)
             if topic_node is None:
-                topic_node = self.info()
-                subject_area_topic_node["children"].append(topic_node)                
+                topic_node = self.topic_info()
+                topic_node["children"].append(curriculum_info)
+                subject_area_topic_node["children"].append(topic_node)  
+            else:
+                topic_node["children"].append(curriculum_info)     
 
-            topic_node["children"].append(menu.info())
+            description = self.description()
+            curriculum_info["children"].append(menu.info(thumbnail_img, description))
             if pdfs_info is not None:
-                topic_node["children"].append(pdfs_info)
+                curriculum_info["children"].append(pdfs_info)
             if videos_info is not None:
-                topic_node["children"].append(videos_info)
+                curriculum_info["children"].append(videos_info)
 
 
 def get_level_map(tree, levels):
     actual_node = levels[0]
     r_levels = levels[1:]
     for children in tree["children"]:
-        #print("IN", children["source_id"], ", ", actual_node)
         if children["source_id"] == actual_node:
             if len(r_levels) >= 1:
                 return get_level_map(children, r_levels)
             else:
                 return children
-            #if node is not None:
-            #    return node
 
 
 class CollectionSection(object):
@@ -533,6 +559,7 @@ class CollectionSection(object):
         self.menu_name = menu_name
         self.resource_url = resource_url
         self.lang = lang
+        self.img_url = None
 
     def __add__(self, o):
         if isinstance(self.body, Tag) and isinstance(o.body, Tag):
@@ -619,6 +646,7 @@ class CollectionSection(object):
             filename = get_name_from_url(img_src)
             self.write_img(img_src, filename)
             img["src"] = filename
+            self.img_url = img_src
 
     def get_videos_urls(self):
         urls = set([])
@@ -714,6 +742,7 @@ class CurriculumHeader(CollectionSection):
         self.filename = filename
         self.menu_name = menu_name
         self.id = id_
+        self.img_url = None
         #self.resources = []
 
 
@@ -1008,13 +1037,13 @@ class TeachEngineeringChef(JsonTreeChef):
             json.dump(web_resource_tree, f, indent=2)
         return web_resource_tree
 
-    def save_thumbnail(self):
-        THUMB_DATA_DIR = build_path([DATA_DIR, 'thumbnail'])
-        filepath = os.path.join(THUMB_DATA_DIR, "TELogoNew.png")
-        document = downloader.read(TeachEngineeringChef.THUMBNAIL, loadjs=False, session=sess)        
-        with open(filepath, 'wb') as f:
-            f.write(document)
-        return filepath
+    #def save_thumbnail(self):
+    #    THUMB_DATA_DIR = build_path([DATA_DIR, 'thumbnail'])
+    #    filepath = os.path.join(THUMB_DATA_DIR, "TELogoNew.png")
+    #    document = downloader.read(TeachEngineeringChef.THUMBNAIL, loadjs=False, session=sess)        
+    #    with open(filepath, 'wb') as f:
+    #        f.write(document)
+    #    return filepath
 
     def scrape(self, args, options):
         lang = options.get('lang', 'en')
@@ -1049,7 +1078,7 @@ class TeachEngineeringChef(JsonTreeChef):
             source_id='teachengineering',
             title='TeachEngineering',
             description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
-            thumbnail=self.save_thumbnail(),
+            thumbnail=TeachEngineeringChef.THUMBNAIL,
             language=LANG,
             children=[],
             license=TeachEngineeringChef.LICENSE,
@@ -1062,7 +1091,7 @@ class TeachEngineeringChef(JsonTreeChef):
                             title=resource["title"],
                             lang=LANG)
             collection.to_file(channel_tree)
-            if counter == 10:
+            if counter == 20:
                 break
             counter += 1
         return channel_tree
@@ -1074,7 +1103,7 @@ class TeachEngineeringChef(JsonTreeChef):
             source_id='teachengineering_es',
             title='TeachEngineering (es)',
             description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
-            thumbnail=self.save_thumbnail(),
+            thumbnail=TeachEngineeringChef.THUMBNAIL,
             language=LANG,
             children=[],
             license=TeachEngineeringChef.LICENSE,
