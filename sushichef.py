@@ -61,20 +61,32 @@ def test():
     """
     Test individual resources
     """
-    url = "https://www.teachengineering.org/activities/view/gat_esr_test_activity1"
+    #url = "https://www.teachengineering.org/activities/view/gat_esr_test_activity1"
+    url = "https://www.teachengineering.org/curricularunits/view/van_heartvalves_unit"
     #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
     #collection_type = "Lessons"
-    collection_type = "Activities"
+    #collection_type = "Activities"
+    collection_type = "CurricularUnits"
+    channel_tree = dict(
+        source_domain="teachengineering.org",
+        source_id='teachengineering',
+        title='TeachEngineering',
+        description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
+        thumbnail="",
+        language="en",
+        children=[],
+        license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict(),
+    )
+
     try:
         subtopic_name = "test"
-        document = downloader.read(url, loadjs=False, session=sess)
-        page = BeautifulSoup(document, 'html.parser')
-        collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip", 
-            source_id=url,
+        collection = Collection(url, 
+            title="test",
+            source_id="test",
             type=collection_type,
             lang="en")
-        collection.to_file(PATH, [collection_type.lower()])
+        collection.to_file(channel_tree)
     except requests.exceptions.HTTPError as e:
         LOGGER.info("Error: {}".format(e)) 
 
@@ -322,7 +334,7 @@ class CurricularUnit(CurriculumType):
     def __init__(self):
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
-            {"id": "summary", "class": [CurriculumHeader, Summary], "menu_name": "summary"},
+            {"id": "summary", "class": [CurriculumHeader, Summary, EngineeringConnection], "menu_name": "summary"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
             {"id": "schedule", "class": CollectionSection, "menu_name": "unit_schedule"},
@@ -1018,6 +1030,7 @@ class TeachEngineeringChef(JsonTreeChef):
     def pre_run(self, args, options):
         #self.crawl(args, options)
         self.scrape(args, options)
+        #test()
         pass
 
     def crawl(self, args, options):
