@@ -2,7 +2,7 @@
 
 from bs4 import BeautifulSoup
 from bs4 import Tag
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import copy
 from http import client
 import json
@@ -45,6 +45,8 @@ TIME_SLEEP = .1
 
 DATA_DIR = "chefdata"
 
+CURRICULAR_UNITS_MAP = defaultdict(set)
+LESSONS_CURRICULAR_MAP = defaultdict(list)
 # webcache
 ###############################################################
 sess = requests.Session()
@@ -267,17 +269,19 @@ class Menu(object):
 
 
 class CurriculumType(object):
-     def render(self, page, menu_filename, lang="en"):
+     def render(self, page, menu_filename, lang="en", resource_url=None):
         for meta_section in self.sections:
             Section = meta_section["class"]
             if isinstance(Section, list):
                 section = sum([subsection(page, filename=menu_filename, 
-                                menu_name=meta_section["menu_name"], lang=lang)
+                                menu_name=meta_section["menu_name"], lang=lang,
+                                resource_url=resource_url)
                                 for subsection in Section])
                 section.id = meta_section["id"] 
             else:
                 section = Section(page, filename=menu_filename, id_=meta_section["id"], 
-                                menu_name=meta_section["menu_name"], lang=lang)
+                                menu_name=meta_section["menu_name"], lang=lang,
+                                resource_url=resource_url)
             yield section
 
 
@@ -337,7 +341,7 @@ class CurricularUnit(CurriculumType):
             {"id": "summary", "class": [CurriculumHeader, Summary, EngineeringConnection], "menu_name": "summary"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
             {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
-            {"id": "schedule", "class": CollectionSection, "menu_name": "unit_schedule"},
+            {"id": "schedule", "class": UnitSchedule, "menu_name": "unit_schedule"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
             {"id": "info", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
@@ -432,7 +436,9 @@ class Collection(object):
 
     def drop_null_sections(self, menu):
         sections = []
-        for section in self.curriculum_type.render(self.page, menu.filepath, lang=self.lang):
+        for section in self.curriculum_type.render(self.page, menu.filepath, 
+                                                    lang=self.lang, 
+                                                    resource_url=self.resource_url):
             if section.body is None:
                 menu.remove(section.id)
             else:
@@ -459,6 +465,17 @@ class Collection(object):
                 thumbnail=thumbnail,
                 description=self.description(),
                 license=self.license,
+                children=[]
+            )
+
+    def empty_info(self, url):
+        return dict(
+                kind=None,
+                source_id=url,
+                title=None,
+                thumbnail=None,
+                description=None,
+                license=None,
                 children=[]
             )
 
@@ -523,13 +540,25 @@ class Collection(object):
                 channel_tree["children"].append(subject_area_topic_node)
 
             topic_node = get_level_map(channel_tree, [subject_area, self.type])
-            thumbnail_img = self.get_thumbnail(sections)
-            curriculum_info = self.info(thumbnail_img)
             if topic_node is None:
-                topic_node = self.topic_info()
+                thumbnail_img = self.get_thumbnail(sections)
+                curriculum_info = self.info(thumbnail_img) #curricular name
+                topic_node = self.topic_info() #topic name
                 topic_node["children"].append(curriculum_info)
+                if self.type == "CurricularUnits":       
+                    #build a template for the curriculums
+                    for url in CURRICULAR_UNITS_MAP[self.resource_url]:
+                        #search lessons in tree, if not exists then this
+                        curriculum_info["children"].append(self.empty_info(url))
+                    
+                else:
+                    #search curricular units with this lesson, if not exists this lesson in CU then assign it.
+                    #LESSONS_CURRICULAR_MAP[]
+                    pass
                 subject_area_topic_node["children"].append(topic_node)  
             else:
+                thumbnail_img = self.get_thumbnail(sections)
+                curriculum_info = self.info(thumbnail_img)
                 topic_node["children"].append(curriculum_info)     
 
             description = self.description()
@@ -749,19 +778,21 @@ class CollectionSection(object):
 
 
 class CurriculumHeader(CollectionSection):
-    def __init__(self, page, filename=None, id_="curriculum-header", menu_name="summary", lang="en"):
+    def __init__(self, page, filename=None, id_="curriculum-header", 
+                menu_name="summary", lang="en", resource_url=None):
         self.body = page.find("div", class_="curriculum-header")
         self.filename = filename
         self.menu_name = menu_name
         self.id = id_
         self.img_url = None
-        #self.resources = []
+        self.resource_url = resource_url
 
 
 class QuickLook(CollectionSection):
-    def __init__(self, page, filename=None, id_="quick", menu_name="quick_look", lang="en"):
+    def __init__(self, page, filename=None, id_="quick", menu_name="quick_look", 
+            lang="en", resource_url=None):
         super(QuickLook, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
         self.body = page.find("div", class_="quick-look")
         ## cleaning html code
         for s in self.body.find_all("script"):
@@ -772,68 +803,92 @@ class QuickLook(CollectionSection):
         div.extract()
 
     def get_subject_area(self):
-        subject_areas = self.body.find_all(lambda tag: tag.name == 'a' and tag.findParent("dd", class_="subject-area"))
+        subject_areas = self.body.find_all(lambda tag: tag.name == 'a' and\
+                        tag.findParent("dd", class_="subject-area"))
         subjects = []
         for a in subject_areas:
             subjects.append(a.text)
         return subjects
 
 
+class UnitSchedule(CollectionSection):
+    def __init__(self, page, filename=None, id_=None, 
+                menu_name=None, lang="en", resource_url=None):
+        super(UnitSchedule, self).__init__(page, filename=filename,
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
+        self.get_schedule(self.body.find("ul"))
+
+    def get_schedule(self, data_list):
+        for curriculum in data_list:
+            a = curriculum.find("a")
+            if a != -1:
+                lesson_url = urljoin(BASE_URL, a["href"])
+                CURRICULAR_UNITS_MAP[self.resource_url].add(lesson_url)
+                LESSONS_CURRICULAR_MAP[lesson_url].append(self.resource_url)
+
+
 class EngineeringConnection(CollectionSection):
     def __init__(self, page, filename=None, id_="engineering_connection", 
-                menu_name="engineering_connection", lang="en"):
+                menu_name="engineering_connection", lang="en", resource_url=None):
         super(EngineeringConnection, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Engineering Connection\s*")))
 
 
 class Summary(CollectionSection):
-    def __init__(self, page, filename=None, id_="summary", menu_name="summary", lang="en"):
+    def __init__(self, page, filename=None, id_="summary", menu_name="summary", 
+                lang="en", resource_url=None):
         super(Summary, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
 
 
 class Introduction(CollectionSection):
-    def __init__(self, page, filename=None, id_="intro", menu_name="introduction", lang="en"):
+    def __init__(self, page, filename=None, id_="intro", menu_name="introduction", 
+                lang="en", resource_url=None):
         super(Introduction, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
 
 
 class Attachments(CollectionSection):
-    def __init__(self, page, filename=None, id_="attachments", menu_name="attachments", lang="en"):
+    def __init__(self, page, filename=None, id_="attachments", 
+                menu_name="attachments", lang="en", resource_url=None):
         super(Attachments, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
 
 
 class Contributors(CollectionSection):
-    def __init__(self, page, filename=None, id_="contributors", menu_name="contributors", lang="en"):
+    def __init__(self, page, filename=None, id_="contributors", 
+            menu_name="contributors", lang="en", resource_url=None):
         super(Contributors, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Contributors\s*")))
 
 
 class SupportingProgram(CollectionSection):
-    def __init__(self, page, filename=None, id_="supporting_program", menu_name="supporting_program", lang="en"):
+    def __init__(self, page, filename=None, id_="supporting_program", 
+                menu_name="supporting_program", lang="en", resource_url=None):
         super(SupportingProgram, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Supporting Program\s*")))
 
 
 class Acknowledgements(CollectionSection):
-    def __init__(self, page, filename=None, id_="acknowledgements", menu_name="acknowledgements", lang="en"):
+    def __init__(self, page, filename=None, id_="acknowledgements", 
+                menu_name="acknowledgements", lang="en", resource_url=None):
         super(Acknowledgements, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Acknowledgements\s*")))
 
 
 class Copyright(CollectionSection):
-    def __init__(self, page, filename=None, id_="copyright", menu_name="copyright", lang="en"):
+    def __init__(self, page, filename=None, id_="copyright", menu_name="copyright", 
+                lang="en", resource_url=None):
         super(Copyright, self).__init__(page, filename=filename,
-                id_=id_, menu_name=menu_name, lang=lang)
+                id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
         self.body = page.find(lambda tag: tag.name=="section" and\
             tag.findChildren("h3", text=re.compile("\s*Copyright\s*")))
 
@@ -1029,8 +1084,8 @@ class TeachEngineeringChef(JsonTreeChef):
 
     def pre_run(self, args, options):
         #self.crawl(args, options)
-        self.scrape(args, options)
-        #test()
+        #self.scrape(args, options)
+        test()
         pass
 
     def crawl(self, args, options):
