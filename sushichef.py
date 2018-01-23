@@ -64,7 +64,7 @@ def test():
     Test individual resources
     """
     #url = "https://www.teachengineering.org/activities/view/gat_esr_test_activity1"
-    url = "https://www.teachengineering.org/curricularunits/view/van_heartvalves_unit"
+    url = "https://www.teachengineering.org/curricularunits/view/cub_dams"
     #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
     #collection_type = "Lessons"
@@ -340,7 +340,7 @@ class CurricularUnit(CurriculumType):
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": "summary", "class": [CurriculumHeader, Summary, EngineeringConnection], "menu_name": "summary"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
-            {"id": "overview", "class": CollectionSection, "menu_name": "unit_overview"},
+            {"id": "overview", "class": UnitSchedule, "menu_name": "unit_overview"},
             {"id": "schedule", "class": UnitSchedule, "menu_name": "unit_schedule"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
             {"id": "info", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
@@ -411,7 +411,7 @@ class Collection(object):
         tries = 0
         while tries < 4:
             try:
-                document = downloader.read(url, loadjs=False)#, session=sess)
+                document = downloader.read(url, loadjs=False, session=sess)
             except requests.exceptions.HTTPError as e:
                 LOGGER.info("Error: {}".format(e))
             except requests.exceptions.ConnectionError:
@@ -420,7 +420,7 @@ class Collection(object):
                 LOGGER.info("Connection error, the resource will be scraped in 5s...")
                 time.sleep(3)
             else:
-                return BeautifulSoup(document, 'html.parser')
+                return BeautifulSoup(document, 'html.parser') #html5lib
             tries += 1
         return False
 
@@ -470,12 +470,12 @@ class Collection(object):
 
     def empty_info(self, url):
         return dict(
-                kind=None,
+                kind=content_kinds.TOPIC,
                 source_id=url,
-                title=None,
+                title="TMP",
                 thumbnail=None,
-                description=None,
-                license=None,
+                description="TMP",
+                license=get_license(licenses.CC_BY, copyright_holder="X").as_dict(),
                 children=[]
             )
 
@@ -516,15 +516,15 @@ class Collection(object):
         for section in sections:
             menu_filename = menu.set_section(section)
             menu_index = menu.to_html(directory="", active_li=menu_filename)
-            section.to_file(menu_filename, menu_index=menu_index)
+            #section.to_file(menu_filename, menu_index=menu_index)
 
         menu.check()
         menu.license = self.license
 
         #check for pdfs and videos on all page
         all_sections = CollectionSection(copy_page, resource_url=self.resource_url, lang=self.lang)
-        pdfs_info = all_sections.build_pdfs_info(base_path, self.license)
-        videos_info = all_sections.build_videos_info(base_path, self.license)
+        pdfs_info = None#all_sections.build_pdfs_info(base_path, self.license)
+        videos_info = None#all_sections.build_videos_info(base_path, self.license)
 
         for subject_area in subjects_area:
             subject_area_topic_node = get_level_map(channel_tree, [subject_area])
@@ -540,33 +540,36 @@ class Collection(object):
                 channel_tree["children"].append(subject_area_topic_node)
 
             topic_node = get_level_map(channel_tree, [subject_area, self.type])
-            if topic_node is None:
-                thumbnail_img = self.get_thumbnail(sections)
-                curriculum_info = self.info(thumbnail_img) #curricular name
-                topic_node = self.topic_info() #topic name
-                topic_node["children"].append(curriculum_info)
-                if self.type == "CurricularUnits":       
-                    #build a template for the curriculums
-                    for url in CURRICULAR_UNITS_MAP[self.resource_url]:
-                        #search lessons in tree, if not exists then this
-                        curriculum_info["children"].append(self.empty_info(url))
-                    
-                else:
-                    #search curricular units with this lesson, if not exists this lesson in CU then assign it.
-                    #LESSONS_CURRICULAR_MAP[]
-                    pass
-                subject_area_topic_node["children"].append(topic_node)  
-            else:
-                thumbnail_img = self.get_thumbnail(sections)
-                curriculum_info = self.info(thumbnail_img)
-                topic_node["children"].append(curriculum_info)     
-
+            thumbnail_img = self.get_thumbnail(sections)
+            curriculum_info = self.info(thumbnail_img) #curricular name
             description = self.description()
             curriculum_info["children"].append(menu.info(thumbnail_img, description))
             if pdfs_info is not None:
                 curriculum_info["children"].append(pdfs_info)
             if videos_info is not None:
                 curriculum_info["children"].append(videos_info)
+            if topic_node is None:
+                topic_node = self.topic_info() #topic name
+                subject_area_topic_node["children"].append(topic_node)
+
+            topic_node["children"].append(curriculum_info)
+            if self.type == "CurricularUnits":       
+                #build a template for the curriculums
+                for url in CURRICULAR_UNITS_MAP[self.resource_url]:
+                    node = get_node_from_channel(url, channel_tree, exclude="CurricularUnits")
+                    if node is None:
+                        curriculum_info["children"].append(self.empty_info(url))
+                    else:
+                        curriculum_info["children"].append(node)
+            else:
+                curriculars_unit_url = LESSONS_CURRICULAR_MAP.get(self.resource_url, [])
+                for curricular_unit_url in curriculars_unit_url:
+                    curricular_node = get_node_from_channel(curricular_unit_url, channel_tree)
+                    if curricular_node is not None:
+                        for i, children in enumerate(curricular_node["children"]):
+                            if children["source_id"] == self.resource_url:
+                                curricular_node["children"][i] = curriculum_info
+                                break
 
 
 def get_level_map(tree, levels):
@@ -578,6 +581,22 @@ def get_level_map(tree, levels):
                 return get_level_map(children, r_levels)
             else:
                 return children
+
+
+def get_node_from_channel(source_id, channel_tree, exclude=None):
+    parent = channel_tree["children"]
+    while len(parent) > 0:
+        for children in parent:
+            if children["source_id"] == source_id:
+                return children
+        nparent = []
+        for children in parent:
+            try:
+                if children["title"] != exclude:
+                    nparent.extend(children["children"])
+            except KeyError:
+                pass
+        parent = nparent
 
 
 class CollectionSection(object):
@@ -816,15 +835,16 @@ class UnitSchedule(CollectionSection):
                 menu_name=None, lang="en", resource_url=None):
         super(UnitSchedule, self).__init__(page, filename=filename,
                 id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
-        self.get_schedule(self.body.find("ul"))
+        if self.body is not None:
+            self.get_schedule(self.body.find_all("a"))
 
     def get_schedule(self, data_list):
-        for curriculum in data_list:
-            a = curriculum.find("a")
-            if a != -1:
-                lesson_url = urljoin(BASE_URL, a["href"])
-                CURRICULAR_UNITS_MAP[self.resource_url].add(lesson_url)
-                LESSONS_CURRICULAR_MAP[lesson_url].append(self.resource_url)
+        if data_list is not None:
+            for a in data_list:
+                if a.get("href", "").startswith("/"):
+                    lesson_url = urljoin(BASE_URL, a["href"])
+                    CURRICULAR_UNITS_MAP[self.resource_url].add(lesson_url)
+                    LESSONS_CURRICULAR_MAP[lesson_url].append(self.resource_url)
 
 
 class EngineeringConnection(CollectionSection):
@@ -1084,8 +1104,8 @@ class TeachEngineeringChef(JsonTreeChef):
 
     def pre_run(self, args, options):
         #self.crawl(args, options)
-        #self.scrape(args, options)
-        test()
+        self.scrape(args, options)
+        #test()
         pass
 
     def crawl(self, args, options):
@@ -1159,8 +1179,8 @@ class TeachEngineeringChef(JsonTreeChef):
                             title=resource["title"],
                             lang=LANG)
             collection.to_file(channel_tree)
-            if counter == 20:
-                break
+            #if counter == 350:
+            #    break
             counter += 1
         return channel_tree
 
