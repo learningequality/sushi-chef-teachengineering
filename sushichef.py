@@ -45,8 +45,10 @@ TIME_SLEEP = .1
 
 DATA_DIR = "chefdata"
 
-CURRICULAR_UNITS_MAP = defaultdict(set)
-LESSONS_CURRICULAR_MAP = defaultdict(list)
+#Curricular units with its lessons
+CURRICULAR_UNITS_MAP = defaultdict(OrderedDict)
+#Lessons related with curricular units
+LESSONS_CURRICULAR_MAP = defaultdict(set)
 # webcache
 ###############################################################
 sess = requests.Session()
@@ -64,7 +66,9 @@ def test():
     Test individual resources
     """
     #url = "https://www.teachengineering.org/activities/view/gat_esr_test_activity1"
-    url = "https://www.teachengineering.org/curricularunits/view/cub_dams"
+    #url = "https://www.teachengineering.org/curricularunits/view/cub_dams"
+    #url = "https://www.teachengineering.org/curricularunits/view/umo_sensorswork_unit"
+    url = "https://www.teachengineering.org/curricularunits/view/cub_service_unit"
     #collection_type = "Sprinkles"
     #collection_type = "MakerChallenges"
     #collection_type = "Lessons"
@@ -201,7 +205,7 @@ class Menu(object):
             zipper.write_index_contents(content)
 
     def to_file(self):
-        self.write('<html><body><meta charset="UTF-8"></head><ul>'+self.to_html()+'</ul></body></html>')
+        self.write('<html><head><meta charset="UTF-8"></head><body><ul>'+self.to_html()+'</ul></body></html>')
 
     def menu_titles(self, titles):
         for title in titles:
@@ -382,7 +386,7 @@ class MakerChallenge(CurriculumType):
 
 
 class Collection(object):
-    def __init__(self, url, source_id, type, title, lang):
+    def __init__(self, url, source_id, type, title, lang="en", subjects_area=None):
         self.page = self.download_page(url)
         if self.page is not False:
             self.title_prefix = self.clean_title(self.page.find("span", class_="title-prefix"))
@@ -391,10 +395,11 @@ class Collection(object):
                 self.title = title
             self.contribution_by = None
             self.source_id = source_id
-            self.resource_url = url
+            self.resource_url = url.strip()
             self.type = type
             self.license = None
             self.lang = lang
+            self.subjects_area = subjects_area
             
             if type == "MakerChallenges":
                 self.curriculum_type = MakerChallenge()
@@ -474,7 +479,7 @@ class Collection(object):
                 source_id=url,
                 title="TMP",
                 thumbnail=None,
-                description="TMP",
+                description="",
                 license=get_license(licenses.CC_BY, copyright_holder="X").as_dict(),
                 children=[]
             )
@@ -490,16 +495,21 @@ class Collection(object):
                 break
         return thumbnail_img
 
+    def get_subjects_area(self):
+        if self.subjects_area is None:
+            copy_page = copy.copy(self.page)
+            ql = QuickLook(copy_page)
+            return ql.get_subject_area()
+        else:
+            return self.subjects_area
+
     def to_file(self, channel_tree):
         LOGGER.info(" + [{}]: {}".format(self.type, self.title))
         LOGGER.info("   - URL: {}".format(self.resource_url))
         copy_page = copy.copy(self.page)
         cr = Copyright(copy_page)
         self.license = get_license(licenses.CC_BY, copyright_holder=cr.get_copyright_info()).as_dict()
-
-        ql = QuickLook(copy_page)
-        subjects_area = ql.get_subject_area()
-
+        subjects_area = self.get_subjects_area()
         base_path = build_path([DATA_DIR, self.type, self.source_id])
         filepath = "{path}/{source_id}.zip".format(path=base_path, 
             source_id=self.source_id)
@@ -516,15 +526,15 @@ class Collection(object):
         for section in sections:
             menu_filename = menu.set_section(section)
             menu_index = menu.to_html(directory="", active_li=menu_filename)
-            #section.to_file(menu_filename, menu_index=menu_index)
+            section.to_file(menu_filename, menu_index=menu_index)
 
         menu.check()
         menu.license = self.license
 
         #check for pdfs and videos on all page
         all_sections = CollectionSection(copy_page, resource_url=self.resource_url, lang=self.lang)
-        pdfs_info = None#all_sections.build_pdfs_info(base_path, self.license)
-        videos_info = None#all_sections.build_videos_info(base_path, self.license)
+        pdfs_info = all_sections.build_pdfs_info(base_path, self.license)
+        videos_info = all_sections.build_videos_info(base_path, self.license)
 
         for subject_area in subjects_area:
             subject_area_topic_node = get_level_map(channel_tree, [subject_area])
@@ -555,17 +565,22 @@ class Collection(object):
             topic_node["children"].append(curriculum_info)
             if self.type == "CurricularUnits":       
                 #build a template for the curriculums
-                for url in CURRICULAR_UNITS_MAP[self.resource_url]:
+                for url, index in CURRICULAR_UNITS_MAP[self.resource_url].items():
+                    #search for lessons
                     node = get_node_from_channel(url, channel_tree, exclude="CurricularUnits")
                     if node is None:
                         curriculum_info["children"].append(self.empty_info(url))
                     else:
                         curriculum_info["children"].append(node)
-            else:
-                curriculars_unit_url = LESSONS_CURRICULAR_MAP.get(self.resource_url, [])
-                for curricular_unit_url in curriculars_unit_url:
-                    curricular_node = get_node_from_channel(curricular_unit_url, channel_tree)
-                    if curricular_node is not None:
+        
+        if self.type != "CurricularUnits":
+            curriculars_unit_url = LESSONS_CURRICULAR_MAP.get(self.resource_url, [])
+            for curricular_unit_url in curriculars_unit_url:
+                #search for curricular units
+                curricular_nodes = get_multiple_node_from_channel(curricular_unit_url, 
+                    channel_tree, max_level=2)
+                if curricular_nodes:
+                    for curricular_node in curricular_nodes:
                         for i, children in enumerate(curricular_node["children"]):
                             if children["source_id"] == self.resource_url:
                                 curricular_node["children"][i] = curriculum_info
@@ -597,6 +612,27 @@ def get_node_from_channel(source_id, channel_tree, exclude=None):
             except KeyError:
                 pass
         parent = nparent
+
+
+def get_multiple_node_from_channel(source_id, channel_tree, exclude=None, max_level=0):
+    parent = channel_tree["children"]
+    results = []
+    level = 1
+    while len(parent) > 0:
+        for children in parent:
+            if children["source_id"] == source_id:
+                results.append(children)
+        nparent = []
+        if level <= max_level:
+            for children in parent:
+                try:
+                    if children["title"] != exclude:
+                        nparent.extend(children["children"])
+                except KeyError:
+                    pass
+        level += 1
+        parent = nparent
+    return results
 
 
 class CollectionSection(object):
@@ -841,10 +877,13 @@ class UnitSchedule(CollectionSection):
     def get_schedule(self, data_list):
         if data_list is not None:
             for a in data_list:
-                if a.get("href", "").startswith("/"):
-                    lesson_url = urljoin(BASE_URL, a["href"])
-                    CURRICULAR_UNITS_MAP[self.resource_url].add(lesson_url)
-                    LESSONS_CURRICULAR_MAP[lesson_url].append(self.resource_url)
+                relative_url = a.get("href", "")
+                if relative_url.startswith("/") and "curricularunits" not in relative_url\
+                    and not relative_url.endswith("pdf"):
+                    lesson_url = urljoin(BASE_URL, a["href"]).strip()
+                    if lesson_url not in CURRICULAR_UNITS_MAP[self.resource_url]:               
+                        CURRICULAR_UNITS_MAP[self.resource_url][lesson_url] = len(CURRICULAR_UNITS_MAP[self.resource_url])
+                    LESSONS_CURRICULAR_MAP[lesson_url].add(self.resource_url)
 
 
 class EngineeringConnection(CollectionSection):
@@ -1125,14 +1164,6 @@ class TeachEngineeringChef(JsonTreeChef):
             json.dump(web_resource_tree, f, indent=2)
         return web_resource_tree
 
-    #def save_thumbnail(self):
-    #    THUMB_DATA_DIR = build_path([DATA_DIR, 'thumbnail'])
-    #    filepath = os.path.join(THUMB_DATA_DIR, "TELogoNew.png")
-    #    document = downloader.read(TeachEngineeringChef.THUMBNAIL, loadjs=False, session=sess)        
-    #    with open(filepath, 'wb') as f:
-    #        f.write(document)
-    #    return filepath
-
     def scrape(self, args, options):
         lang = options.get('lang', 'en')
         crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
@@ -1171,7 +1202,7 @@ class TeachEngineeringChef(JsonTreeChef):
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
-        counter = 0
+        #counter = 0
         for resource in web_resource_tree["children"]:
             collection = Collection(resource["url"],
                             source_id=resource["id"],
@@ -1181,7 +1212,7 @@ class TeachEngineeringChef(JsonTreeChef):
             collection.to_file(channel_tree)
             #if counter == 350:
             #    break
-            counter += 1
+            #counter += 1
         return channel_tree
 
     def _build_scraping_json_tree_es(self, web_resource_tree):
@@ -1198,13 +1229,18 @@ class TeachEngineeringChef(JsonTreeChef):
         )
         for resource in web_resource_tree["children"]:
             if resource["spanishVersionId"] is not None:
+                collection_en = Collection(resource["url"],
+                        source_id=resource["id"],
+                        type=resource["collection"],
+                        title=resource["title"])
+                
                 collection = Collection(resource["url_es"],
                         source_id=resource["spanishVersionId"],
                         type=resource["collection"],
                         title=resource["title"],
-                        lang=LANG)
+                        lang=LANG,
+                        subjects_area=collection_en.get_subjects_area())
                 collection.to_file(channel_tree)
-                break
         return channel_tree
 
 
