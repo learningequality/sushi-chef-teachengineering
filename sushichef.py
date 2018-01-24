@@ -38,7 +38,7 @@ BASE_URL = "https://www.teachengineering.org"
 
 # If False then no download is made
 # for debugging proporses
-DOWNLOAD_VIDEOS = False
+DOWNLOAD_VIDEOS = True
 
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .1
@@ -1142,10 +1142,9 @@ class TeachEngineeringChef(JsonTreeChef):
         super(TeachEngineeringChef, self).__init__()
 
     def pre_run(self, args, options):
-        #self.crawl(args, options)
+        self.crawl(args, options)
         self.scrape(args, options)
         #test()
-        pass
 
     def crawl(self, args, options):
         web_resource_tree = dict(
@@ -1210,7 +1209,7 @@ class TeachEngineeringChef(JsonTreeChef):
                             title=resource["title"],
                             lang=LANG)
             collection.to_file(channel_tree)
-            #if counter == 350:
+            #if counter == 50:
             #    break
             #counter += 1
         return channel_tree
