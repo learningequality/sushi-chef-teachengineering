@@ -1190,8 +1190,10 @@ class LivingLabs(Collection):
         sections_files = self.build_sections_data(base_path, sections)
         for section, files_info in zip(sections, sections_files):
             section["files"] = files_info
-        #all_sections.build_videos_info(base_path, self.license)
+        videos_info = all_sections.build_videos_info(base_path, self.license)
         info = self.info(descriptions[0], sections)
+        if videos_info is not None:
+            info["children"].append(videos_info)
         return info
 
     def build_sections_data(self, base_path, sections):
