@@ -189,7 +189,10 @@ class Menu(object):
     """
     def __init__(self, page, filepath=None, id_=None, exclude_titles=None, 
                 include_titles=None, lang="en"):
-        self.body = page.find("div", id=id_)
+        if page:
+            self.body = page.find("div", id=id_)
+        else:
+            self.body = None
         self.menu = OrderedDict()
         self.filepath = filepath
         self.exclude_titles = [] if exclude_titles is None else exclude_titles
@@ -198,7 +201,8 @@ class Menu(object):
         if include_titles is not None:
             for title_id, title_text in include_titles:
                 self.add(title_id, title_text)
-        self.menu_titles(self.body.find_all("li"))
+        if self.body:
+            self.menu_titles(self.body.find_all("li"))
 
     def write(self, content):
         with html_writer.HTMLWriter(self.filepath, "w") as zipper:
@@ -401,15 +405,15 @@ class Collection(object):
             self.lang = lang
             self.subjects_area = subjects_area
             
-            if type == "MakerChallenges":
+            if self.type == "MakerChallenges":
                 self.curriculum_type = MakerChallenge()
-            elif type == "Lessons":
+            elif self.type == "Lessons":
                 self.curriculum_type = Lesson()
-            elif type == "Activities":
+            elif self.type == "Activities":
                 self.curriculum_type = Activity()
-            elif type == "CurricularUnits":
+            elif self.type == "CurricularUnits":
                 self.curriculum_type = CurricularUnit()
-            elif type == "Sprinkles":
+            elif self.type == "Sprinkles":
                 self.curriculum_type = Sprinkle()
 
     def download_page(self, url):
@@ -1128,6 +1132,134 @@ def build_path(levels):
     return path
 
 
+class LivingLabs(Collection):
+    def __init__(self):
+        url = urljoin(BASE_URL, 'livinglabs')
+        super(LivingLabs, self).__init__(url, "LivingLabs", "LivingLabs", "", lang="en", subjects_area=None)
+        self.license = get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict()
+
+    def info(self, description, sections):
+        info = dict(
+            kind=content_kinds.TOPIC,
+            source_id=self.resource_url,
+            title="Living Labs",
+            thumbnail=None,
+            description=description,
+            license=self.license,
+            children=[]
+        )
+        
+        for section in sections:
+            section_info = dict(
+                kind=content_kinds.TOPIC,
+                source_id=section["resource_url"],
+                title=section["title"],
+                thumbnail=section["thumbnail"],
+                description=section["description"],
+                license=self.license,
+                children=[section["files"]]
+            )
+            info["children"].append(section_info)
+
+        return info
+
+    def sections(self):
+        sections = []
+        for a in self.page.find_all(lambda tag: tag.name == "a" and tag.findParent("h3")):
+            url = urljoin(BASE_URL, a.get("href", ""))
+            section_info = {"resource_url": url, "title": a.text, "description": "", "thumbnail": None}
+            sections.append(section_info)
+
+        descriptions = []
+        for descr in self.page.find_all(lambda tag: tag.name == "p" and tag.findParent("div", class_="row")):
+            descriptions.append(descr.text.replace("\r", "").replace("\n", "").strip())
+
+        for row in self.page.find_all("div", class_="row"):
+            img_url = row.find("img")
+            a = row.find("a")
+            if a is not None:
+                for section in sections:
+                    if section["title"] == a.text and img_url is not None:
+                        section["thumbnail"] = urljoin(BASE_URL, img_url.get("src", None))
+
+        for section, description in zip(sections, descriptions[1:]):
+            section["description"] = description
+        
+        all_sections = CollectionSection(self.page, resource_url=self.resource_url, lang=self.lang)
+        base_path = build_path([DATA_DIR, self.type])
+        sections_files = self.build_sections_data(base_path, sections)
+        for section, files_info in zip(sections, sections_files):
+            section["files"] = files_info
+        #all_sections.build_videos_info(base_path, self.license)
+        info = self.info(descriptions[0], sections)
+        return info
+
+    def build_sections_data(self, base_path, sections):
+        for section in sections:
+            collection = Collection(section["resource_url"], source_id=section["title"], 
+                        type=section["title"], title="")
+            
+            content_html = collection.page.find_all(
+                lambda tag: tag.name=="div" and tag.findParent("div", class_="page-wrapper"))
+            content = content_html[1]
+            filepath = "{path}/{source_id}.zip".format(path=base_path, 
+                source_id=section["title"])
+            collection_section = LivingLabsSection(content, filename=filepath, lang=self.lang)
+            collection_section.to_file(filepath)
+            yield dict(
+                kind=content_kinds.HTML5,
+                source_id=filepath,
+                title="Menu Index",
+                description="",
+                license=self.license,
+                language=self.lang,
+                thumbnail=None,
+                files=[
+                    dict(
+                        file_type=content_kinds.HTML5,
+                        path=filepath
+                    )
+                ]
+            ) 
+            
+
+
+class LivingLabsSection(CollectionSection):
+    def get_imgs(self):
+        images = []
+        for img in self.body.find_all("img"):
+            if img["src"].startswith("/"):
+                img_src = urljoin(BASE_URL, img["src"])
+            else:
+                img_src = img["src"]
+            filename = get_name_from_url(img_src)
+            img["src"] = "files/"+filename
+            images.append((img_src, filename))
+        return images
+
+    def get_content(self):
+        remove_links(self.body)
+        return "".join([str(p) for p in self.body])
+
+    def write_img(self, url, filename):
+        with html_writer.HTMLWriter(self.filename, "a") as zipper:
+            zipper.write_url(url, filename, directory="files")
+
+    def write(self, filepath, content):
+        with html_writer.HTMLWriter(filepath, "w") as zipper:
+            zipper.write_index_contents(content)
+
+    def to_file(self, filename):
+        if self.body is not None and filename is not None:
+            images = self.get_imgs()
+            content = self.get_content()
+            html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
+                content)
+            self.write(filename, content)
+            for img_src, filename in images:
+                self.write_img(img_src, filename)
+
+
 class TeachEngineeringChef(JsonTreeChef):
     ROOT_URL = "https://{HOSTNAME}"
     HOSTNAME = "teachengineering.org"
@@ -1142,7 +1274,7 @@ class TeachEngineeringChef(JsonTreeChef):
         super(TeachEngineeringChef, self).__init__()
 
     def pre_run(self, args, options):
-        self.crawl(args, options)
+        #self.crawl(args, options)
         self.scrape(args, options)
         #test()
 
@@ -1201,14 +1333,16 @@ class TeachEngineeringChef(JsonTreeChef):
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
+        living_labs = LivingLabs()
+        channel_tree["children"].append(living_labs.sections())
         #counter = 0
-        for resource in web_resource_tree["children"]:
-            collection = Collection(resource["url"],
-                            source_id=resource["id"],
-                            type=resource["collection"],
-                            title=resource["title"],
-                            lang=LANG)
-            collection.to_file(channel_tree)
+        #for resource in web_resource_tree["children"]:
+        #    collection = Collection(resource["url"],
+        #                    source_id=resource["id"],
+        #                    type=resource["collection"],
+        #                    title=resource["title"],
+        #                    lang=LANG)
+        #    collection.to_file(channel_tree)
             #if counter == 50:
             #    break
             #counter += 1
