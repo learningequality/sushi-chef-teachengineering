@@ -38,7 +38,7 @@ BASE_URL = "https://www.teachengineering.org"
 
 # If False then no download is made
 # for debugging proporses
-DOWNLOAD_VIDEOS = True
+DOWNLOAD_VIDEOS = False
 
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .1
@@ -685,6 +685,7 @@ class CollectionSection(object):
 
     def get_content(self):
         #self.get_imgs()
+        remove_iframes(self.body)
         remove_links(self.body)
         return "".join([str(p) for p in self.body])
 
@@ -1002,10 +1003,11 @@ class ResourceType(object):
 
 
 class ImagesListResource(object):
-    def __init__(self, resource_urls, filepath):
+    def __init__(self, resource_urls, filepath, title):
         self.urls = self.clean_urls(resource_urls)
         self.prefix = "files"
         self.filepath = filepath
+        self.title = title
 
     def clean_urls(self, urls):
         cleaned_urls = []
@@ -1044,7 +1046,7 @@ class ImagesListResource(object):
         return dict(
                 kind=content_kinds.HTML5,
                 source_id=self.filepath,
-                title="Images",
+                title="Images " + self.title,
                 description="",
                 license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict(),
                 language="en",
@@ -1186,6 +1188,11 @@ def remove_links(content):
         for link in content.find_all("a"):
             link.replaceWithChildren()
 
+def remove_iframes(content):
+    if content is not None:
+        for iframe in content.find_all("iframe"):
+            iframe.extract()
+
 
 def check_shorter_url(url):
     shorters_urls = set(["bitly.com", "goo.gl", "tinyurl.com", "ow.ly", "ls.gd", 
@@ -1267,24 +1274,22 @@ class LivingLabs(Collection):
             section["resources"] = files_info
 
         info = self.info(descriptions[0], sections)
-        #videos_info = all_sections.build_videos_info(base_path, self.license)        
-        #if videos_info is not None:
-        #    info["children"].append(videos_info)
+        videos_info = all_sections.build_videos_info(base_path, self.license)        
+        if videos_info is not None:
+            info["children"].append(videos_info)
         return info
 
     def build_sections_data(self, base_path, sections):
         for section in sections:
             collection = Collection(section["resource_url"], source_id=section["title"], 
-                        type=section["title"], title="")
-            content_html = collection.page.find_all(
-                lambda tag: tag.name=="div" and tag.findParent("div", class_="page-wrapper"))
-            content = content_html[1]
+                        type=section["title"], title=section["title"])
             filepath = "{path}/{source_id}.zip".format(path=base_path, 
                 source_id=section["title"])
-            collection_section = LivingLabsSection(content, filename=filepath, lang=self.lang)
+            collection_section = LivingLabsSection(collection, filename=filepath, 
+                base_path=base_path)
             sub_pages = collection_section.get_domain_links()
-            collection_section.to_file(filepath)
-            main_info = dict(
+            collection_section.to_file()
+            menu_info = dict(
                 kind=content_kinds.HTML5,
                 source_id=filepath,
                 title="Menu Index",
@@ -1300,57 +1305,93 @@ class LivingLabs(Collection):
                 ]
             )
             resources = []
-            for sub_page in sub_pages:
-                if sub_page.startswith("/livinglabs"):
-                    #url = "https://www.teachengineering.org/livinglabs/renewableenergyeducators"
+            for i, sub_page in enumerate(sub_pages):
+                if sub_page.startswith("/livinglabs/"):
+                    page_name = sub_page.split("/")[-1]
                     url = urljoin(BASE_URL, sub_page)
-                    collection = Collection(url, source_id="Resources", 
-                                type="LivingLabResources", title="")
-                    resources_section = LivingLabsSection(collection.page, resource_url=url, lang=self.lang)
-
-                    resources_info = None#resources_section.resources()
+                    source_id = section["title"]+"_"+str(i)
+                    base_path = build_path([DATA_DIR, "LivingLabs", page_name])
+                    filename = "{path}/{source_id}.zip".format(path=base_path, 
+                        source_id="{}_data".format(source_id))
+                    collection = Collection(url, source_id=source_id, 
+                        type="LivingLabResources", title=page_name)
+                    resources_section = LivingLabsSection(collection, 
+                        base_path=base_path, filename=filename)
+                    resources_info = resources_section.resources()
                     if resources_info is not None:
-                        resources.append(resources_info)
-            yield [main_info, resources]
-            
+                        resources.extend(resources_info)
 
-
-class LivingLabsSection(CollectionSection):
-
-    def resources(self):
-        base_path = build_path([DATA_DIR, "LivingLabs", 'RenovableEnergy', 'Resources'])
-        filepath = "{path}/{source_id}.zip".format(path=base_path, 
-            source_id="renewableenergyeducators")
-        img = ImagesListResource(self.get_imgs_into_links(), filepath=filepath)
-        img.to_file()
-        license = get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict()
-        videos_info = self.build_videos_info(base_path, license)
-        resources = dict(
+            resource_topic = dict(
                 kind=content_kinds.TOPIC,
                 source_id="Resources",
                 title="Resources",
                 description="",
-                license=license,
+                license=self.license,
                 language=self.lang,
                 thumbnail=None,
-                children=[img.info(), videos_info]
+                children=resources
             ) 
+            yield [menu_info, resource_topic]
+            
+
+class LivingLabsSection(CollectionSection):
+    def __init__(self,  collection, filename=None, id_=None, menu_name=None, base_path=None):
+        page = collection.page.find("div", class_="page-wrapper")
+        resource_url = collection.resource_url
+        lang = collection.lang
+        super(LivingLabsSection, self).__init__(page, filename=filename, id_=id_, 
+            menu_name=menu_name, resource_url=resource_url, lang=lang)
+        self.base_path = base_path
+        self.license = get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict()
+        self.collection = collection
+
+    def resources(self):
+        img_filepath = "{path}/{source_id}_img.zip".format(path=self.base_path, 
+            source_id=self.collection.source_id)
+        img = ImagesListResource(self.get_imgs_into_links(), filepath=img_filepath, 
+            title=self.collection.title)
+        videos_info = self.build_videos_info(self.base_path, self.license)
+        info = [self.info()]
+        if videos_info is not None:
+            info.append(videos_info)
+        if len(img.urls) > 0:
+            img.to_file()
+            info.append(img.info())
+        self.to_file()
+        return info
+
+    def info(self):
+        return dict(
+                kind=content_kinds.HTML5,
+                source_id=self.filename,
+                title="Menu Index "+ self.collection.title,
+                description="",
+                license=self.license,
+                language=self.lang,
+                thumbnail=None,
+                files=[
+                    dict(
+                        file_type=content_kinds.HTML5,
+                        path=self.filename
+                    )
+                ]
+            )
 
     def write_img(self, url, filename):
         with html_writer.HTMLWriter(self.filename, "a") as zipper:
             zipper.write_url(url, filename, directory="files")
 
-    def write(self, filepath, content):
-        with html_writer.HTMLWriter(filepath, "w") as zipper:
+    def write(self, content):
+        with html_writer.HTMLWriter(self.filename, "w") as zipper:
             zipper.write_index_contents(content)
 
-    def to_file(self, filename):
-        if self.body is not None and filename is not None:
+    def to_file(self):
+        if self.body is not None:
             images = self.get_imgs(prefix="files/")
             content = self.get_content()
             html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
                 content)
-            self.write(filename, content)
+            self.write(content)
             for img_src, img_filename in images:
                 self.write_img(img_src, img_filename)
 
