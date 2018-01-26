@@ -1448,7 +1448,7 @@ class TeachEngineeringChef(JsonTreeChef):
         super(TeachEngineeringChef, self).__init__()
 
     def pre_run(self, args, options):
-        #self.crawl(args, options)
+        self.crawl(args, options)
         self.scrape(args, options)
         #test()
 
