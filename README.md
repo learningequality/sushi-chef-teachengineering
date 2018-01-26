@@ -39,8 +39,8 @@ The zip archive can then be imported into Kolibri Studio using a LineCook script
 
 ## Usage
 
-      ./run.sh
-
+      ./sushichef.py -v --reset --token='.token' lang=en
+      ./sushichef.py -v --reset --token='.token' lang=es
 
 
 ## Description
