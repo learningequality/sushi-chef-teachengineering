@@ -38,7 +38,7 @@ BASE_URL = "https://www.teachengineering.org"
 
 # If False then no download is made
 # for debugging proporses
-DOWNLOAD_VIDEOS = False
+DOWNLOAD_VIDEOS = True
 
 # time.sleep for debugging proporses, it helps to check log messages
 TIME_SLEEP = .1
@@ -684,7 +684,6 @@ class CollectionSection(object):
         return title
 
     def get_content(self):
-        #self.get_imgs()
         remove_iframes(self.body)
         remove_links(self.body)
         return "".join([str(p) for p in self.body])
@@ -1245,7 +1244,7 @@ class LivingLabs(Collection):
 
         return info
 
-    def sections(self):
+    def sections(self, channel_tree):
         sections = []
         for a in self.page.find_all(lambda tag: tag.name == "a" and tag.findParent("h3")):
             url = urljoin(BASE_URL, a.get("href", ""))
@@ -1269,7 +1268,7 @@ class LivingLabs(Collection):
         
         all_sections = CollectionSection(self.page, resource_url=self.resource_url, lang=self.lang)
         base_path = build_path([DATA_DIR, self.type])
-        sections_files = self.build_sections_data(base_path, sections)
+        sections_files = self.build_sections_data(base_path, sections, channel_tree)
         for section, files_info in zip(sections, sections_files):
             section["resources"] = files_info
 
@@ -1279,7 +1278,7 @@ class LivingLabs(Collection):
             info["children"].append(videos_info)
         return info
 
-    def build_sections_data(self, base_path, sections):
+    def build_sections_data(self, base_path, sections, channel_tree):
         for section in sections:
             collection = Collection(section["resource_url"], source_id=section["title"], 
                         type=section["title"], title=section["title"])
@@ -1317,9 +1316,18 @@ class LivingLabs(Collection):
                         type="LivingLabResources", title=page_name)
                     resources_section = LivingLabsSection(collection, 
                         base_path=base_path, filename=filename)
+                    lessons = list(attach_curriculums_from_urls(
+                        resources_section.get_curriculums(), channel_tree))
                     resources_info = resources_section.resources()
                     if resources_info is not None:
                         resources.extend(resources_info)
+                    if len(lessons) > 0:
+                        resources.extend(lessons)
+                elif sub_page.startswith("/activities/") or sub_page.startswith("/lessons/"):
+                    nodes = list(attach_curriculums_from_urls(
+                        collection_section.get_curriculums(), channel_tree))
+                    if len(nodes) > 0:
+                        resources.extend(nodes)
 
             resource_topic = dict(
                 kind=content_kinds.TOPIC,
@@ -1344,6 +1352,13 @@ class LivingLabsSection(CollectionSection):
         self.base_path = base_path
         self.license = get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict()
         self.collection = collection
+
+    def get_curriculums(self):
+        def check_curriculum(tag):
+            return tag.name == "a" and tag.attrs.get("href", "").startswith("/activities/") or\
+            tag.attrs.get("href", "").startswith("/lessons/")
+        links = self.body.find_all(check_curriculum)
+        return [urljoin(BASE_URL, a.get("href", "").strip()) for a in links]
 
     def resources(self):
         img_filepath = "{path}/{source_id}_img.zip".format(path=self.base_path, 
@@ -1394,6 +1409,29 @@ class LivingLabsSection(CollectionSection):
             self.write(content)
             for img_src, img_filename in images:
                 self.write_img(img_src, img_filename)
+
+
+def attach_curriculums_from_urls(links, channel_tree):
+    curriculums = defaultdict(list)
+    for url in links:
+        node = get_node_from_channel(url, channel_tree, exclude="CurricularUnits")
+        if url.find("activities") != -1:
+            source_id = "Activities"
+        else:
+            source_id = "Lessons"
+        if node is not None:
+            curriculums[source_id].append(node)
+
+    for curriculum_type, children in curriculums.items():
+        if len(children) > 0:
+            yield dict(
+                kind=content_kinds.TOPIC,
+                source_id=curriculum_type,
+                title=curriculum_type,
+                description="",
+                license=get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict(),
+                children=children
+            ) 
 
 
 class TeachEngineeringChef(JsonTreeChef):
@@ -1469,19 +1507,19 @@ class TeachEngineeringChef(JsonTreeChef):
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
-        living_labs = LivingLabs()
-        channel_tree["children"].append(living_labs.sections())
         #counter = 0
-        #for resource in web_resource_tree["children"]:
-        #    collection = Collection(resource["url"],
-        #                    source_id=resource["id"],
-        #                    type=resource["collection"],
-        #                    title=resource["title"],
-        #                    lang=LANG)
-        #    collection.to_file(channel_tree)
-            #if counter == 50:
+        for resource in web_resource_tree["children"]:
+            collection = Collection(resource["url"],
+                            source_id=resource["id"],
+                            type=resource["collection"],
+                            title=resource["title"],
+                            lang=LANG)
+            collection.to_file(channel_tree)
+            #if counter == 20:
             #    break
             #counter += 1
+        living_labs = LivingLabs()
+        channel_tree["children"].append(living_labs.sections(channel_tree))
         return channel_tree
 
     def _build_scraping_json_tree_es(self, web_resource_tree):
