@@ -94,7 +94,7 @@ def test():
             lang="en")
         collection.to_file(channel_tree)
     except requests.exceptions.HTTPError as e:
-        LOGGER.info("Error: {}".format(e)) 
+        LOGGER.info("Error: {}".format(e))
 
 
 def check_subtitles(page):
@@ -108,7 +108,7 @@ def check_subtitles(page):
             with open("/tmp/subtitles.csv", 'a') as csv_file:
                 csv_writer = csv.writer(csv_file, delimiter=",")
                 csv_writer.writerow([url] + list(info["subtitles"].keys()))
-            
+
 
 class ResourceBrowser(object):
     def __init__(self, resource_url):
@@ -133,7 +133,7 @@ class ResourceBrowser(object):
                             k = k.strip().replace('"', "").replace("'", "")
                             v = v.strip().replace('"', "").replace("'", "")
                             if k in keys:
-                                azureSearchSettings[k] = v 
+                                azureSearchSettings[k] = v
                         except ValueError:
                             pass
             except IndexError:
@@ -273,7 +273,7 @@ class Menu(object):
                     path=self.filepath
                 )
             ]
-        ) 
+        )
 
 
 class CurriculumType(object):
@@ -1108,10 +1108,11 @@ class YouTubeResource(ResourceType):
     def subtitles_dict(self):
         video_info = self.get_video_info()
         video_id = video_info["id"]
-        subtitles_info = video_info["subtitles"]
         subs = []
-        for language in subtitles_info.keys():
-            subs.append(dict(file_type=SUBTITLES_FILE, youtube_id=video_id, language=language))
+        if 'subtitles' in video_info:
+            subtitles_info = video_info["subtitles"]
+            for language in subtitles_info.keys():
+                subs.append(dict(file_type=SUBTITLES_FILE, youtube_id=video_id, language=language))
         return subs
 
     def process_file(self, download=False, filepath=None):
@@ -1142,7 +1143,7 @@ class YouTubeResource(ResourceType):
                 video = pafy.new(self.resource_url)
                 best = video.getbest(preftype="mp4")
                 video_filepath = best.download(filepath=download_to)
-            except (URLError, ConnectionResetError) as e:
+            except (ValueError, IOError, OSError, URLError, ConnectionResetError) as e:
                 LOGGER.info(e)
                 LOGGER.info("Download retry:"+str(try_number))
                 time.sleep(.8)
@@ -1194,7 +1195,7 @@ def remove_iframes(content):
 
 
 def check_shorter_url(url):
-    shorters_urls = set(["bitly.com", "goo.gl", "tinyurl.com", "ow.ly", "ls.gd", 
+    shorters_urls = set(["bitly.com", "goo.gl", "tinyurl.com", "ow.ly", "ls.gd",
                 "buff.ly", "adf.ly", "bit.do", "mcaf.ee"])
     index_init = url.find("://")
     index_end = url[index_init+3:].find("/")
