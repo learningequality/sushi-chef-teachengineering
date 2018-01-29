@@ -5,6 +5,7 @@ from bs4 import Tag
 from collections import OrderedDict, defaultdict
 import copy
 from http import client
+import gettext
 import json
 from le_utils.constants import licenses, content_kinds, file_formats
 import logging
@@ -250,11 +251,11 @@ class Menu(object):
             if values["section"] is None:
                 raise Exception("{} is not linked to a section".format(name))
 
-    def info(self, thumbnail, description):
+    def info(self, thumbnail, title, description):
         return dict(
             kind=content_kinds.HTML5,
             source_id=self.filepath,
-            title="Menu Index",
+            title=title,
             description=description,
             license=self.license,
             language=self.lang,
@@ -540,7 +541,7 @@ class Collection(object):
                 subject_area_topic_node = dict(
                     kind=content_kinds.TOPIC,
                     source_id=subject_area,
-                    title=subject_area,
+                    title=_(subject_area),
                     description="",
                     license=self.license,
                     children=[]
@@ -551,11 +552,11 @@ class Collection(object):
             thumbnail_img = self.get_thumbnail(sections)
             curriculum_info = self.info(thumbnail_img) #curricular name
             description = self.description()
-            curriculum_info["children"].append(menu.info(thumbnail_img, description))
+            curriculum_info["children"].append(menu.info(thumbnail_img, self.title, description))
             if pdfs_info is not None:
-                curriculum_info["children"].append(pdfs_info)
+                curriculum_info["children"] += pdfs_info
             if videos_info is not None:
-                curriculum_info["children"].append(videos_info)
+                curriculum_info["children"] += videos_info
             if topic_node is None:
                 topic_node = self.topic_info() #topic name
                 subject_area_topic_node["children"].append(topic_node)
@@ -688,8 +689,8 @@ class CollectionSection(object):
             resource_links = self.body.find_all("a", href=re.compile("^\/content|https\:\/\/www.teachengineering"))
             for link in resource_links:
                 if link["href"].endswith(".pdf") and link["href"] not in urls:
-                    name = get_name_from_url(link["href"])
-                    urls[link["href"]] = (name, urljoin(BASE_URL, link["href"]))
+                    filename = get_name_from_url(link["href"])
+                    urls[link["href"]] = (filename, link.text, urljoin(BASE_URL, link["href"]))
             return urls.values()
 
     def build_pdfs_info(self, path, license=None):
@@ -698,25 +699,26 @@ class CollectionSection(object):
             return
 
         PDFS_DATA_DIR = build_path([path, 'pdfs'])
-        info = dict(
-            kind=content_kinds.TOPIC,
-            source_id=PDFS_DATA_DIR,
-            title="Files",
-            description='',
-            children=[],
-            language=self.lang,
-            license=license)
+        #info = dict(
+        #    kind=content_kinds.TOPIC,
+        #    source_id=PDFS_DATA_DIR,
+        #    title=_("Files"),
+        #    description='',
+        #    children=[],
+        #    language=self.lang,
+        #    license=license)
 
-        for name, pdf_url in pdfs_urls:
+        files_list = []
+        for filename, name, pdf_url in pdfs_urls:
             try:
                 response = downloader.read(pdf_url)
-                pdf_filepath = os.path.join(PDFS_DATA_DIR, name)
+                pdf_filepath = os.path.join(PDFS_DATA_DIR, filename)
                 with open(pdf_filepath, 'wb') as f:
                     f.write(response)
                 files = dict(
                     kind=content_kinds.DOCUMENT,
                     source_id=pdf_url,
-                    title=get_name_from_url_no_ext(name),
+                    title=name,
                     description='',
                     files=[dict(
                         file_type=content_kinds.DOCUMENT,
@@ -724,11 +726,12 @@ class CollectionSection(object):
                     )],
                     language=self.lang,
                     license=license)
-                info["children"].append(files)
+                #info["children"].append(files)
+                files_list.append(files)
             except requests.exceptions.HTTPError as e:
                 LOGGER.info("Error: {}".format(e))
 
-        return info
+        return files_list
 
     def get_domain_links(self):
         return set([link.get("href", "") for link in self.body.find_all("a") if link.get("href", "").startswith("/")])
@@ -808,21 +811,22 @@ class CollectionSection(object):
             return
 
         VIDEOS_DATA_DIR = build_path([path, 'videos'])
-        info = dict(
-            kind=content_kinds.TOPIC,
-            source_id=VIDEOS_DATA_DIR,
-            title="Videos",
-            description='',
-            children=[],
-            language=self.lang,
-            license=license)
+        videos_list = []
+        #info = dict(
+        #    kind=content_kinds.TOPIC,
+        #    source_id=VIDEOS_DATA_DIR,
+        #    title="Videos",
+        #    description='',
+        #    children=[],
+        #    language=self.lang,
+        #    license=license)
 
         for i, url in enumerate(videos_urls):
             resource = YouTubeResource(url, lang=self.lang)
             resource.to_file(filepath=VIDEOS_DATA_DIR)
             if resource.resource_file is not None:
-                info["children"].append(resource.resource_file)
-        return info
+                videos_list.append(resource.resource_file)
+        return videos_list
 
     def write(self, filename, content):
         with html_writer.HTMLWriter(self.filename, "a") as zipper:
@@ -1270,7 +1274,7 @@ class LivingLabs(Collection):
         info = self.info(descriptions[0], sections)
         videos_info = all_sections.build_videos_info(base_path, self.license)        
         if videos_info is not None:
-            info["children"].append(videos_info)
+            info["children"] += videos_info
         return info
 
     def build_sections_data(self, base_path, sections, channel_tree):
@@ -1286,7 +1290,7 @@ class LivingLabs(Collection):
             menu_info = dict(
                 kind=content_kinds.HTML5,
                 source_id=filepath,
-                title="Menu Index",
+                title=collection.title,
                 description="",
                 license=self.license,
                 language=self.lang,
@@ -1324,17 +1328,21 @@ class LivingLabs(Collection):
                     if len(nodes) > 0:
                         resources.extend(nodes)
 
-            resource_topic = dict(
-                kind=content_kinds.TOPIC,
-                source_id="Resources",
-                title="Resources",
-                description="",
-                license=self.license,
-                language=self.lang,
-                thumbnail=None,
-                children=resources
-            ) 
-            yield [menu_info, resource_topic]
+            if len(resources) > 0:
+                resource_topic = dict(
+                    kind=content_kinds.TOPIC,
+                    source_id="Resources",
+                    title=_("Resources"),
+                    description="",
+                    license=self.license,
+                    language=self.lang,
+                    thumbnail=None,
+                    children=resources
+                )
+                resource_topic_l = [resource_topic]
+            else:
+                resource_topic_l = []
+            yield [menu_info] + resource_topic_l
             
 
 class LivingLabsSection(CollectionSection):
@@ -1363,7 +1371,7 @@ class LivingLabsSection(CollectionSection):
         videos_info = self.build_videos_info(self.base_path, self.license)
         info = [self.info()]
         if videos_info is not None:
-            info.append(videos_info)
+            info += videos_info
         if len(img.urls) > 0:
             img.to_file()
             info.append(img.info())
@@ -1374,7 +1382,7 @@ class LivingLabsSection(CollectionSection):
         return dict(
                 kind=content_kinds.HTML5,
                 source_id=self.filename,
-                title="Menu Index "+ self.collection.title,
+                title=self.collection.title,
                 description="",
                 license=self.license,
                 language=self.lang,
@@ -1397,6 +1405,8 @@ class LivingLabsSection(CollectionSection):
 
     def to_file(self):
         if self.body is not None:
+            LOGGER.info(" + [{}]: {}".format(self.collection.type, self.collection.title))
+            LOGGER.info("   - URL: {}".format(self.collection.resource_url))
             images = self.get_imgs(prefix="files/")
             content = self.get_content()
             html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
@@ -1429,6 +1439,16 @@ def attach_curriculums_from_urls(links, channel_tree):
             ) 
 
 
+def save_thumbnail():
+    url = "https://scontent.xx.fbcdn.net/v/t1.0-1/p50x50/10492197_815509258473514_3497726003055575270_n.jpg?oh=bfcd61aebdb3d2265c31c2286290bd31&oe=5B1FACCA"
+    THUMB_DATA_DIR = build_path([DATA_DIR, 'thumbnail'])
+    filepath = os.path.join(THUMB_DATA_DIR, "TELogoNew.jpg")
+    document = downloader.read(url, loadjs=False, session=sess)        
+    with open(filepath, 'wb') as f:
+        f.write(document)
+        return filepath
+
+
 class TeachEngineeringChef(JsonTreeChef):
     ROOT_URL = "https://{HOSTNAME}"
     HOSTNAME = "teachengineering.org"
@@ -1436,14 +1456,15 @@ class TeachEngineeringChef(JsonTreeChef):
     CRAWLING_STAGE_OUTPUT_TPL = 'web_resource_tree_{}.json'
     SCRAPING_STAGE_OUTPUT_TPL = 'ricecooker_json_tree_{}.json'
     LICENSE = get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()
-    THUMBNAIL = 'https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png'
+    #THUMBNAIL = 'https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png'
 
     def __init__(self):
         build_path([TeachEngineeringChef.TREES_DATA_DIR])
+        self.thumbnail = save_thumbnail()
         super(TeachEngineeringChef, self).__init__()
 
     def pre_run(self, args, options):
-        self.crawl(args, options)
+        #self.crawl(args, options)
         self.scrape(args, options)
         #test()
 
@@ -1470,6 +1491,11 @@ class TeachEngineeringChef(JsonTreeChef):
             web_resource_tree = json.load(f)
             assert web_resource_tree['kind'] == 'TeachEngineeringResourceTree'
          
+        translation = gettext.translation('subjects', 'lang/', languages=[lang])
+        translation.install()
+        global _ 
+        _ = translation.gettext
+
         if lang == 'es':
             channel_tree = self._build_scraping_json_tree_es(web_resource_tree)
         else:
@@ -1489,22 +1515,22 @@ class TeachEngineeringChef(JsonTreeChef):
             source_id='teachengineering',
             title='TeachEngineering',
             description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
-            thumbnail=TeachEngineeringChef.THUMBNAIL,
+            thumbnail=self.thumbnail,
             language=LANG,
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
-        #counter = 0
-        for resource in web_resource_tree["children"]:
-            collection = Collection(resource["url"],
-                            source_id=resource["id"],
-                            type=resource["collection"],
-                            title=resource["title"],
-                            lang=LANG)
-            collection.to_file(channel_tree)
-            #if counter == 20:
-            #    break
-            #counter += 1
+        counter = 0
+        #for resource in web_resource_tree["children"]:
+        #    collection = Collection(resource["url"],
+        #                    source_id=resource["id"],
+        #                    type=resource["collection"],
+        #                    title=resource["title"],
+        #                    lang=LANG)
+        #    collection.to_file(channel_tree)
+        #    if counter == 20:
+        #        break
+        #    counter += 1
         living_labs = LivingLabs()
         channel_tree["children"].append(living_labs.sections(channel_tree))
         return channel_tree
@@ -1515,8 +1541,8 @@ class TeachEngineeringChef(JsonTreeChef):
             source_domain=TeachEngineeringChef.HOSTNAME,
             source_id='teachengineering_es',
             title='TeachEngineering (es)',
-            description="""The TeachEngineering digital library is a collaborative project between faculty, students and teachers associated with five founding partner universities, with National Science Foundation funding. The collection continues to grow and evolve with new additions submitted from more than 50 additional contributor organizations, a cadre of volunteer teacher and engineer reviewers, and feedback from teachers who use the curricula in their classrooms."""[:400], #400 UPPER LIMIT characters allowed 
-            thumbnail=TeachEngineeringChef.THUMBNAIL,
+            description="""La biblioteca digital de TeachEngineering es un proyecto colaborativo entre académicos, estudiantes and profesores, asociados con cinco universidades como socios fundadores con los fondos de la Fundación Nacional de Ciencia. La colección continua creciendo y desarrollando nuevas adiciones enviadas desde más de 50 organizaciones colaboradoras, un voluntariado de profesores e ingenieros que revisan el contenido, y profesores que desde sus salones de clase utilizan y dan retroalimentación a los planes de estudio."""[:400], #400 UPPER LIMIT characters allowed 
+            thumbnail=self.thumbnail,
             language=LANG,
             children=[],
             license=TeachEngineeringChef.LICENSE,
