@@ -699,15 +699,6 @@ class CollectionSection(object):
             return
 
         PDFS_DATA_DIR = build_path([path, 'pdfs'])
-        #info = dict(
-        #    kind=content_kinds.TOPIC,
-        #    source_id=PDFS_DATA_DIR,
-        #    title=_("Files"),
-        #    description='',
-        #    children=[],
-        #    language=self.lang,
-        #    license=license)
-
         files_list = []
         for filename, name, pdf_url in pdfs_urls:
             try:
@@ -726,7 +717,6 @@ class CollectionSection(object):
                     )],
                     language=self.lang,
                     license=license)
-                #info["children"].append(files)
                 files_list.append(files)
             except requests.exceptions.HTTPError as e:
                 LOGGER.info("Error: {}".format(e))
@@ -812,14 +802,6 @@ class CollectionSection(object):
 
         VIDEOS_DATA_DIR = build_path([path, 'videos'])
         videos_list = []
-        #info = dict(
-        #    kind=content_kinds.TOPIC,
-        #    source_id=VIDEOS_DATA_DIR,
-        #    title="Videos",
-        #    description='',
-        #    children=[],
-        #    language=self.lang,
-        #    license=license)
 
         for i, url in enumerate(videos_urls):
             resource = YouTubeResource(url, lang=self.lang)
@@ -1285,6 +1267,8 @@ class LivingLabs(Collection):
                 source_id=section["title"])
             collection_section = LivingLabsSection(collection, filename=filepath, 
                 base_path=base_path)
+            lessons_main_page = list(attach_curriculums_from_urls(
+                        collection_section.get_curriculums(), channel_tree))
             sub_pages = collection_section.get_domain_links()
             collection_section.to_file()
             menu_info = dict(
@@ -1322,11 +1306,9 @@ class LivingLabs(Collection):
                         resources.extend(resources_info)
                     if len(lessons) > 0:
                         resources.extend(lessons)
-                elif sub_page.startswith("/activities/") or sub_page.startswith("/lessons/"):
-                    nodes = list(attach_curriculums_from_urls(
-                        collection_section.get_curriculums(), channel_tree))
-                    if len(nodes) > 0:
-                        resources.extend(nodes)
+
+            if len(lessons_main_page) > 0:
+                resources.extend(lessons_main_page)
 
             if len(resources) > 0:
                 resource_topic = dict(
@@ -1355,6 +1337,8 @@ class LivingLabsSection(CollectionSection):
         self.base_path = base_path
         self.license = get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict()
         self.collection = collection
+        LOGGER.info(" + [{}]: {}".format(self.collection.type, self.collection.title))
+        LOGGER.info("   - URL: {}".format(self.collection.resource_url))
 
     def get_curriculums(self):
         def check_curriculum(tag):
@@ -1405,8 +1389,6 @@ class LivingLabsSection(CollectionSection):
 
     def to_file(self):
         if self.body is not None:
-            LOGGER.info(" + [{}]: {}".format(self.collection.type, self.collection.title))
-            LOGGER.info("   - URL: {}".format(self.collection.resource_url))
             images = self.get_imgs(prefix="files/")
             content = self.get_content()
             html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
@@ -1520,17 +1502,17 @@ class TeachEngineeringChef(JsonTreeChef):
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
-        counter = 0
-        #for resource in web_resource_tree["children"]:
-        #    collection = Collection(resource["url"],
-        #                    source_id=resource["id"],
-        #                    type=resource["collection"],
-        #                    title=resource["title"],
-        #                    lang=LANG)
-        #    collection.to_file(channel_tree)
-        #    if counter == 20:
-        #        break
-        #    counter += 1
+        #counter = 0
+        for resource in web_resource_tree["children"]:
+            collection = Collection(resource["url"],
+                            source_id=resource["id"],
+                            type=resource["collection"],
+                            title=resource["title"],
+                            lang=LANG)
+            collection.to_file(channel_tree)
+            #if counter == 20:
+            #    break
+            #counter += 1
         living_labs = LivingLabs()
         channel_tree["children"].append(living_labs.sections(channel_tree))
         return channel_tree
