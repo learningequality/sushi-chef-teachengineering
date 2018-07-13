@@ -11,7 +11,6 @@ from le_utils.constants import licenses, content_kinds, file_formats
 import logging
 import ntpath
 import os
-import pafy
 from pathlib import Path
 import re
 import requests
@@ -45,7 +44,7 @@ DOWNLOAD_VIDEOS = True
 TIME_SLEEP = .1
 
 DATA_DIR = "chefdata"
-
+GENERAL_COPYRIGHT_HOLDER = "TeachEngineering digital library  © 2013 by Regents of the University of Colorado; original © 2013 Board of Regents, University of Nebraska"
 #Curricular units with its lessons
 CURRICULAR_UNITS_MAP = defaultdict(OrderedDict)
 #Lessons related with curricular units
@@ -83,7 +82,7 @@ def test():
         thumbnail="",
         language="en",
         children=[],
-        license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict(),
+        license=get_license(licenses.CC_BY, copyright_holder=GENERAL_COPYRIGHT_HOLDER).as_dict(),
     )
 
     try:
@@ -287,6 +286,7 @@ class CurriculumType(object):
 #the ids are fixed by the web page
 class Activity(CurriculumType):
     def __init__(self):
+        self.name = "Activities"
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection],
@@ -313,6 +313,7 @@ class Activity(CurriculumType):
 
 class Lesson(CurriculumType):
     def __init__(self):
+        self.name = "Lessons"
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": "summary", "class": [CurriculumHeader, Summary, EngineeringConnection], "menu_name": "summary"},
@@ -335,6 +336,7 @@ class Lesson(CurriculumType):
 
 class CurricularUnit(CurriculumType):
     def __init__(self):
+        self.name = "Curricular Units"
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": "summary", "class": [CurriculumHeader, Summary, EngineeringConnection], "menu_name": "summary"},
@@ -349,6 +351,7 @@ class CurricularUnit(CurriculumType):
 
 class Sprinkle(CurriculumType):
     def __init__(self):
+        self.name = "Sprinkles"
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": "intro", "class": [CurriculumHeader, Introduction], "menu_name": "introduction"},
@@ -363,6 +366,7 @@ class Sprinkle(CurriculumType):
 
 class MakerChallenge(CurriculumType):
     def __init__(self):
+        self.name = "Maker Challenges"
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
             {"id": "summary", "class": [CurriculumHeader, Summary], "menu_name": "maker_challenge_recap"},
@@ -454,7 +458,7 @@ class Collection(object):
         return dict(
                 kind=content_kinds.TOPIC,
                 source_id=self.type,
-                title=self.type,
+                title=self.curriculum_type.name,
                 description="",
                 license=self.license,
                 children=[]
@@ -503,7 +507,7 @@ class Collection(object):
             return self.subjects_area
 
     def to_file(self, channel_tree):
-        LOGGER.info(" + [{}]: {}".format(self.type, self.title))
+        LOGGER.info(" + [{}]: {}".format(self.curriculum_type.name, self.title))
         LOGGER.info("   - URL: {}".format(self.resource_url))
         copy_page = copy.copy(self.page)
         cr = Copyright(copy_page)
@@ -690,7 +694,8 @@ class CollectionSection(object):
             for link in resource_links:
                 if link["href"].endswith(".pdf") and link["href"] not in urls:
                     filename = get_name_from_url(link["href"])
-                    urls[link["href"]] = (filename, link.text, urljoin(BASE_URL, link["href"]))
+                    name = link.text.replace("(pdf)", "").strip()
+                    urls[link["href"]] = (filename, name, urljoin(BASE_URL, link["href"]))
             return urls.values()
 
     def build_pdfs_info(self, path, license=None):
@@ -969,10 +974,11 @@ class ResourceType(object):
     """
         Base class for File, WebPage, Video, Audio resources
     """
-    def __init__(self, type_name=None):
-        LOGGER.info("Resource Type: "+type_name)
+    def __init__(self, resource_url=None, type_name=None):
+        self.resource_url = resource_url
         self.type_name = type_name
         self.resource_file = None
+        LOGGER.info("Resource Type: {} [{}]".format(type_name, self.resource_url))
 
     def to_file(self, filepath=None):
         pass
@@ -1027,7 +1033,7 @@ class ImagesListResource(object):
                 source_id=self.filepath,
                 title="Images " + self.title,
                 description="",
-                license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict(),
+                license=get_license(licenses.CC_BY, copyright_holder=GENERAL_COPYRIGHT_HOLDER).as_dict(),
                 language="en",
                 thumbnail=None,
                 files=[
@@ -1040,10 +1046,12 @@ class ImagesListResource(object):
 
 class YouTubeResource(ResourceType):
     def __init__(self, resource_url, type_name="Youtube", lang="en"):
-        super(YouTubeResource, self).__init__(type_name=type_name)
-        self.resource_url = self.clean_url(resource_url)
+        super(YouTubeResource, self).__init__(resource_url=self.clean_url(resource_url), 
+            type_name=type_name)
         self.file_format = file_formats.MP4
         self.lang = lang
+        self.filepath = None
+        self.filename = None
 
     def clean_url(self, url):
         if url[-1] == "/":
@@ -1062,21 +1070,23 @@ class YouTubeResource(ResourceType):
         url = "".join(url.split("?")[:1])
         return url.replace("embed/", "watch?v=").strip()
 
-    def get_video_info(self):
+    def get_video_info(self, download_to=None, subtitles=True):
         ydl_options = {
-                'writesubtitles': True,
-                'allsubtitles': True,
+                'writesubtitles': subtitles,
+                'allsubtitles': subtitles,
                 'no_warnings': True,
                 'restrictfilenames':True,
                 'continuedl': True,
                 'quiet': False,
-                'format': "bestvideo[height<={maxheight}][ext=mp4]+bestaudio[ext=m4a]/best[height<={maxheight}][ext=mp4]".format(maxheight='720')
+                'format': "bestvideo[height<={maxheight}][ext=mp4]+bestaudio[ext=m4a]/best[height<={maxheight}][ext=mp4]".format(maxheight='480'),
+                'outtmpl': '{}/%(id)s'.format(download_to),
+                'noplaylist': False
             }
 
         with youtube_dl.YoutubeDL(ydl_options) as ydl:
             try:
                 ydl.add_default_info_extractors()
-                info = ydl.extract_info(self.resource_url, download=False)
+                info = ydl.extract_info(self.resource_url, download=(download_to is not None))
                 return info
             except(youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
                     youtube_dl.utils.ExtractorError) as e:
@@ -1096,43 +1106,68 @@ class YouTubeResource(ResourceType):
         return subs
 
     def process_file(self, download=False, filepath=None):
-        if download is True:
-            video_filepath = self.video_download(download_to=filepath)
-        else:
-            video_filepath = None
-
-        if video_filepath is not None:
-            files = [dict(file_type=content_kinds.VIDEO, path=video_filepath)]
+        self.download(download=download, base_path=filepath)
+        if self.filepath:
+            files = [dict(file_type=content_kinds.VIDEO, path=self.filepath)]
             files += self.subtitles_dict()
 
             self.add_resource_file(dict(
                 kind=content_kinds.VIDEO,
                 source_id=self.resource_url,
-                title=get_name_from_url_no_ext(video_filepath),
+                title=self.filename,#get_name_from_url_no_ext(video_filepath),
                 description='',
                 files=files,
                 language=self.lang,
-                license=get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()))
+                license=get_license(licenses.CC_BY, copyright_holder=GENERAL_COPYRIGHT_HOLDER).as_dict()))
 
     #youtubedl has some troubles downloading videos in youtube,
     #sometimes raises connection error
     #for that I choose pafy for downloading
-    def video_download(self, download_to="/tmp/"):
-        for try_number in range(10):
+    #def video_download(self, download_to="/tmp/"):
+    #    for try_number in range(10):
+    #        try:
+    #            video = pafy.new(self.resource_url)
+    #            best = video.getbest(preftype="mp4")
+    #            video_filepath = best.download(filepath=download_to)
+    #        except (ValueError, IOError, OSError, URLError, ConnectionResetError) as e:
+    #            LOGGER.info(e)
+    #            LOGGER.info("Download retry:"+str(try_number))
+    #            time.sleep(.8)
+    #        except (youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
+    #                youtube_dl.utils.ExtractorError, OSError) as e:
+    #            LOGGER.info("An error ocurred, may be the video is not available.")
+    #            return
+    #        else:
+    #            return video_filepath
+
+    def download(self, download=True, base_path=None):
+        if not "watch?" in self.resource_url or "/user/" in self.resource_url or\
+            download is False:
+            return
+
+        download_to = base_path
+        for i in range(4):
             try:
-                video = pafy.new(self.resource_url)
-                best = video.getbest(preftype="mp4")
-                video_filepath = best.download(filepath=download_to)
+                info = self.get_video_info(download_to=download_to, subtitles=False)
+                if info is not None:
+                    LOGGER.info("Video resolution: {}x{}".format(info.get("width", ""), info.get("height", "")))
+                    self.filepath = os.path.join(download_to, "{}.mp4".format(info["id"]))
+                    self.filename = info["title"]
+                    if self.filepath is not None and os.stat(self.filepath).st_size == 0:
+                        LOGGER.info("Empty file")
+                        self.filepath = None
             except (ValueError, IOError, OSError, URLError, ConnectionResetError) as e:
                 LOGGER.info(e)
-                LOGGER.info("Download retry:"+str(try_number))
+                LOGGER.info("Download retry")
                 time.sleep(.8)
             except (youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
                     youtube_dl.utils.ExtractorError, OSError) as e:
                 LOGGER.info("An error ocurred, may be the video is not available.")
                 return
+            except OSError:
+                return
             else:
-                return video_filepath
+                return
 
     def to_file(self, filepath=None):
         self.process_file(download=DOWNLOAD_VIDEOS, filepath=filepath)
@@ -1198,7 +1233,7 @@ class LivingLabs(Collection):
     def __init__(self):
         url = urljoin(BASE_URL, 'livinglabs')
         super(LivingLabs, self).__init__(url, "LivingLabs", "LivingLabs", "", lang="en", subjects_area=None)
-        self.license = get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict()
+        self.license = get_license(licenses.CC_BY, copyright_holder=GENERAL_COPYRIGHT_HOLDER).as_dict()
 
     def info(self, description, sections):
         info = dict(
@@ -1335,7 +1370,7 @@ class LivingLabsSection(CollectionSection):
         super(LivingLabsSection, self).__init__(page, filename=filename, id_=id_, 
             menu_name=menu_name, resource_url=resource_url, lang=lang)
         self.base_path = base_path
-        self.license = get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict()
+        self.license = get_license(licenses.CC_BY, copyright_holder=GENERAL_COPYRIGHT_HOLDER).as_dict()
         self.collection = collection
         LOGGER.info(" + [{}]: {}".format(self.collection.type, self.collection.title))
         LOGGER.info("   - URL: {}".format(self.collection.resource_url))
@@ -1416,7 +1451,7 @@ def attach_curriculums_from_urls(links, channel_tree):
                 source_id=curriculum_type,
                 title=curriculum_type,
                 description="",
-                license=get_license(licenses.CC_BY, copyright_holder="Teach Engineering").as_dict(),
+                license=get_license(licenses.CC_BY, copyright_holder=GENERAL_COPYRIGHT_HOLDER).as_dict(),
                 children=children
             ) 
 
@@ -1437,7 +1472,7 @@ class TeachEngineeringChef(JsonTreeChef):
     TREES_DATA_DIR = os.path.join(DATA_DIR, 'trees')
     CRAWLING_STAGE_OUTPUT_TPL = 'web_resource_tree_{}.json'
     SCRAPING_STAGE_OUTPUT_TPL = 'ricecooker_json_tree_{}.json'
-    LICENSE = get_license(licenses.CC_BY, copyright_holder="TeachEngineering").as_dict()
+    LICENSE = get_license(licenses.CC_BY, copyright_holder="The source of this material is the TeachEngineering digital library collection at www.TeachEngineering.org. All rights reserved.").as_dict()
     #THUMBNAIL = 'https://www.teachengineering.org/images/logos/v-636511398960000000/TELogoNew.png'
 
     def __init__(self):
@@ -1467,8 +1502,14 @@ class TeachEngineeringChef(JsonTreeChef):
         return web_resource_tree
 
     def scrape(self, args, options):
-        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,
-                                TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
+        lang = options.get('lang', 'en')
+        download_video = options.get('--download-video', "1")
+        if int(download_video) == 0:
+            global DOWNLOAD_VIDEOS
+            DOWNLOAD_VIDEOS = False
+
+        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
+                                TeachEngineeringChef.CRAWLING_STAGE_OUTPUT_TPL.format(lang))
         with open(crawling_stage, 'r') as f:
             web_resource_tree = json.load(f)
             assert web_resource_tree['kind'] == 'TeachEngineeringResourceTree'
