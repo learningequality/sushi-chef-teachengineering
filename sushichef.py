@@ -200,8 +200,18 @@ class Menu(object):
         with html_writer.HTMLWriter(self.filepath, "w") as zipper:
             zipper.write_index_contents(content)
 
+    def write_css_js(self, filepath):
+        with html_writer.HTMLWriter(filepath, "a") as zipper, open("chefdata/styles.css") as f:
+            content = f.read()
+            zipper.write_contents("styles.css", content, directory="css/")
+
+        with html_writer.HTMLWriter(filepath, "a") as zipper, open("chefdata/scripts.js") as f:
+            content = f.read()
+            zipper.write_contents("scripts.js", content, directory="js/")
+
     def to_file(self):
-        self.write('<html><head><meta charset="UTF-8"></head><body><ul>'+self.to_html()+'</ul></body></html>')
+        self.write('<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body>'+self.to_html()+'<script src="scripts.js"></script></body></html>')
+        self.write_css_js(self.filepath)
 
     def menu_titles(self, titles):
         for title in titles:
@@ -235,20 +245,21 @@ class Menu(object):
         return self.get(section.id)
 
     def to_html(self, directory="files/", active_li=None):
-        li = []
+        li = ['<ul class="sidebar-items">']
         for e in self.menu.values():
             li.append("<li>")
-            if active_li is not None and e["filename"] == active_li:
-                li.append('{text}'.format(text=e["text"]))
-            else:
-                li.append('<a href="{directory}{filename}">{text}</a>'.format(directory=directory, **e))
+            #if active_li is not None and e["filename"] == active_li:
+            #    li.append('{text}'.format(text=e["text"]))
+            #else:
+            li.append('<a href="{directory}{filename}" class="sidebar-link">{text}</a>'.format(directory=directory, **e))
             li.append("</li>")
+        li.append("</ul>")
         return "".join(li)
 
     def check(self):
         for name, values in self.menu.items():
             if values["section"] is None:
-                raise Exception("{} is not linked to a section".format(name))
+                raise Exception("{} is not added to a section".format(name))
 
     def info(self, thumbnail, title, description):
         return dict(
@@ -306,6 +317,7 @@ class Activity(CurriculumType):
             {"id": "extensions", "class": CollectionSection, "menu_name": "activity_extensions"},
             {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
+            {"id": "attachments", "class": Attachments, "menu_name": "attachments"},
             {"id": "info", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
@@ -329,6 +341,7 @@ class Lesson(CurriculumType):
             {"id": "multimedia", "class": CollectionSection, "menu_name": "additional_multimedia_support"},
             {"id": "extensions", "class": CollectionSection, "menu_name": "extensions"},
             {"id": "references", "class": CollectionSection, "menu_name": "references"},
+            {"id": "attachments", "class": Attachments, "menu_name": "attachments"},
             {"id": "info", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
@@ -359,6 +372,7 @@ class Sprinkle(CurriculumType):
             {"id": "procedure", "class": CollectionSection, "menu_name": "procedure"},
             {"id": "wrapup", "class": CollectionSection, "menu_name": "wrap_up_-_thought_questions"},
             {"id": "morelikethis", "class": CollectionSection, "menu_name": "more_like_this"},
+            {"id": "attachments", "class": Attachments, "menu_name": "attachments"},
             {"id": "info", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
@@ -379,6 +393,7 @@ class MakerChallenge(CurriculumType):
             {"id": "tips", "class": CollectionSection, "menu_name": "tips"},
             {"id": "other", "class": CollectionSection, "menu_name": "other"},
             {"id": "acknowledgements", "class": CollectionSection, "menu_name": "acknowledgements"},
+            {"id": "attachments", "class": Attachments, "menu_name": "attachments"},
             {"id": "info", "class": [Contributors, Copyright, SupportingProgram],
             "menu_name": "info"},
         ]
@@ -517,7 +532,7 @@ class Collection(object):
         filepath = "{path}/{source_id}.zip".format(path=base_path, 
             source_id=self.source_id)
         menu = Menu(self.page, filepath=filepath, id_="CurriculumNav", 
-            exclude_titles=["attachments", "comments"], 
+            exclude_titles=["comments"], #attachments
             include_titles=[("quick", "Quick Look")],
             lang=self.lang)
         menu.add("info", "Info")
@@ -829,10 +844,10 @@ class CollectionSection(object):
             content = self.get_content()
 
             if menu_index is not None:
-                html = '<html><head><meta charset="UTF-8"></head><body>{}{}</body></html>'.format(
+                html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="../css/styles.css"></head><body><div class="sidebar"><a class="sidebar-link toggle-sidebar-button" href="javascript:void(0)" onclick="javascript:toggleNavMenu();">&#9776;</a>{}</div><div class="main-content-with-sidebar">{}</div><script src="../js/scripts.js"></script></body></html>'.format(
                     menu_index, content)
             else:
-                html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
+                html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="../css/styles.css"></head><body>{}<script src="../js/scripts.js"></script></body></html>'.format(
                     content)
 
             self.write(filename, html)
@@ -923,6 +938,16 @@ class Attachments(CollectionSection):
         super(Attachments, self).__init__(page, filename=filename,
                 id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
 
+    def get_content(self):
+        remove_iframes(self.body)
+        remove_links(self.body)
+        for div in self.body.find_all("div"):
+            if div.text.find("pdf") == -1:
+                div.extract()
+            else:
+                div.replace_with(div.text + " " + "Look for the document in current folder")
+        return "".join([str(p) for p in self.body])
+
 
 class Contributors(CollectionSection):
     def __init__(self, page, filename=None, id_="contributors", 
@@ -1004,9 +1029,9 @@ class ImagesListResource(object):
         return cleaned_urls
 
     def menu(self):
-        tag = "<ul>"
+        tag = '<ul class="sidebar-items">'
         for url in self.urls:
-            tag += "<li><a href={}/{}>{}</a></li>".format(
+            tag += '<li><a href="{}/{}" class="sidebar-link">{}</a></li>'.format(
                 self.prefix, get_name_from_url(url), get_name_from_url_no_ext(url))
         tag += "</ul>"
         return tag
@@ -1021,7 +1046,7 @@ class ImagesListResource(object):
 
     def to_file(self):
         content = self.menu()
-        html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
+        html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body>{}<script src="scripts.js"></script></body></html>'.format(
             content)
         self.write(content)
         for img_url in self.urls:
@@ -1114,31 +1139,11 @@ class YouTubeResource(ResourceType):
             self.add_resource_file(dict(
                 kind=content_kinds.VIDEO,
                 source_id=self.resource_url,
-                title=self.filename,#get_name_from_url_no_ext(video_filepath),
+                title=self.filename,
                 description='',
                 files=files,
                 language=self.lang,
                 license=get_license(licenses.CC_BY, copyright_holder=GENERAL_COPYRIGHT_HOLDER).as_dict()))
-
-    #youtubedl has some troubles downloading videos in youtube,
-    #sometimes raises connection error
-    #for that I choose pafy for downloading
-    #def video_download(self, download_to="/tmp/"):
-    #    for try_number in range(10):
-    #        try:
-    #            video = pafy.new(self.resource_url)
-    #            best = video.getbest(preftype="mp4")
-    #            video_filepath = best.download(filepath=download_to)
-    #        except (ValueError, IOError, OSError, URLError, ConnectionResetError) as e:
-    #            LOGGER.info(e)
-    #            LOGGER.info("Download retry:"+str(try_number))
-    #            time.sleep(.8)
-    #        except (youtube_dl.utils.DownloadError, youtube_dl.utils.ContentTooShortError,
-    #                youtube_dl.utils.ExtractorError, OSError) as e:
-    #            LOGGER.info("An error ocurred, may be the video is not available.")
-    #            return
-    #        else:
-    #            return video_filepath
 
     def download(self, download=True, base_path=None):
         if not "watch?" in self.resource_url or "/user/" in self.resource_url or\
@@ -1413,6 +1418,15 @@ class LivingLabsSection(CollectionSection):
                     )
                 ]
             )
+    
+    def write_css_js(self, filepath):
+        with html_writer.HTMLWriter(filepath, "a") as zipper, open("chefdata/styles.css") as f:
+            content = f.read()
+            zipper.write_contents("styles.css", content, directory="css/")
+
+        with html_writer.HTMLWriter(filepath, "a") as zipper, open("chefdata/scripts.js") as f:
+            content = f.read()
+            zipper.write_contents("scripts.js", content, directory="js/")
 
     def write_img(self, url, filename):
         with html_writer.HTMLWriter(self.filename, "a") as zipper:
@@ -1426,9 +1440,10 @@ class LivingLabsSection(CollectionSection):
         if self.body is not None:
             images = self.get_imgs(prefix="files/")
             content = self.get_content()
-            html = '<html><head><meta charset="UTF-8"></head><body>{}</body></html>'.format(
+            html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body>{}</body></html>'.format(
                 content)
-            self.write(content)
+            self.write(html)
+            self.write_css_js(self.filename)
             for img_src, img_filename in images:
                 self.write_img(img_src, img_filename)
 
@@ -1480,8 +1495,22 @@ class TeachEngineeringChef(JsonTreeChef):
         self.thumbnail = save_thumbnail()
         super(TeachEngineeringChef, self).__init__()
 
+    def download_css_js(self):
+        r = requests.get("https://raw.githubusercontent.com/learningequality/html-app-starter/master/css/styles.css")
+        with open("chefdata/styles.css", "wb") as f:
+            f.write(r.content)
+
+        r = requests.get("https://raw.githubusercontent.com/learningequality/html-app-starter/master/js/scripts.js")
+        with open("chefdata/scripts.js", "wb") as f:
+            f.write(r.content)
+
     def pre_run(self, args, options):
-        #self.crawl(args, options)
+        css = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chefdata/styles.css")
+        js = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chefdata/scripts.js")
+        if not if_file_exists(css) or not if_file_exists(js):
+            LOGGER.info("Downloading styles")
+            self.download_css_js()
+        self.crawl(args, options)
         self.scrape(args, options)
         #test()
 
@@ -1551,7 +1580,7 @@ class TeachEngineeringChef(JsonTreeChef):
                             title=resource["title"],
                             lang=LANG)
             collection.to_file(channel_tree)
-            #if counter == 20:
+            #if counter == 0:
             #    break
             #counter += 1
         living_labs = LivingLabs()
