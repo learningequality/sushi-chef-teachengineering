@@ -367,6 +367,7 @@ class CurricularUnit(CurriculumType):
             {"id": "overview", "class": UnitSchedule, "menu_name": "unit_overview"},
             {"id": "schedule", "class": UnitSchedule, "menu_name": "unit_schedule"},
             {"id": "assessment", "class": CollectionSection, "menu_name": "assessment"},
+            {"id": "attachments", "class": Attachments, "menu_name": "attachments"},
             {"id": "info", "class": [Contributors, Copyright, SupportingProgram, Acknowledgements],
             "menu_name": "info"},
         ]
