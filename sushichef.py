@@ -218,7 +218,7 @@ class Menu(object):
             zipper.write_contents("scripts.js", content, directory="js/")
 
     def to_file(self):
-        self.write('<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body>'+self.to_html()+'<script src="scripts.js"></script></body></html>')
+        self.write('<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body><div class="main-content-with-sidebar">'+self.to_html()+'</div><script src="js/scripts.js"></script></body></html>')
         self.write_css_js(self.filepath)
 
     def menu_titles(self, titles):
@@ -854,7 +854,7 @@ class CollectionSection(object):
                 html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="../css/styles.css"></head><body><div class="sidebar"><a class="sidebar-link toggle-sidebar-button" href="javascript:void(0)" onclick="javascript:toggleNavMenu();">&#9776;</a>{}</div><div class="main-content-with-sidebar">{}</div><script src="../js/scripts.js"></script></body></html>'.format(
                     menu_index, content)
             else:
-                html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="../css/styles.css"></head><body>{}<script src="../js/scripts.js"></script></body></html>'.format(
+                html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="../css/styles.css"></head><body><div class="main-content-with-sidebar">{}</div><script src="../js/scripts.js"></script></body></html>'.format(
                     content)
 
             self.write(filename, html)
@@ -1053,7 +1053,7 @@ class ImagesListResource(object):
 
     def to_file(self):
         content = self.menu()
-        html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body>{}<script src="scripts.js"></script></body></html>'.format(
+        html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body><div class="main-content-with-sidebar">{}</div><script src="scripts.js"></script></body></html>'.format(
             content)
         self.write(content)
         for img_url in self.urls:
@@ -1447,7 +1447,7 @@ class LivingLabsSection(CollectionSection):
         if self.body is not None:
             images = self.get_imgs(prefix="files/")
             content = self.get_content()
-            html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body>{}</body></html>'.format(
+            html = '<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/styles.css"></head><body><div class="main-content-with-sidebar">{}</div></body></html>'.format(
                 content)
             self.write(html)
             self.write_css_js(self.filename)
