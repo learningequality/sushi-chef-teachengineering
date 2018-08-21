@@ -65,14 +65,7 @@ def test():
     """
     Test individual resources
     """
-    #url = "https://www.teachengineering.org/activities/view/gat_esr_test_activity1"
-    #url = "https://www.teachengineering.org/curricularunits/view/cub_dams"
-    #url = "https://www.teachengineering.org/curricularunits/view/umo_sensorswork_unit"
     url = "https://www.teachengineering.org/curricularunits/view/cub_service_unit"
-    #collection_type = "Sprinkles"
-    #collection_type = "MakerChallenges"
-    #collection_type = "Lessons"
-    #collection_type = "Activities"
     collection_type = "CurricularUnits"
     channel_tree = dict(
         source_domain="teachengineering.org",
@@ -256,9 +249,6 @@ class Menu(object):
         li = ['<ul class="sidebar-items">']
         for e in self.menu.values():
             li.append("<li>")
-            #if active_li is not None and e["filename"] == active_li:
-            #    li.append('{text}'.format(text=e["text"]))
-            #else:
             li.append('<a href="{directory}{filename}" class="sidebar-link">{text}</a>'.format(directory=directory, **e))
             li.append("</li>")
         li.append("</ul>")
@@ -1586,7 +1576,6 @@ class TeachEngineeringChef(JsonTreeChef):
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
-        #counter = 0
         for resource in web_resource_tree["children"]:
             collection = Collection(resource["url"],
                             source_id=resource["id"],
@@ -1594,9 +1583,6 @@ class TeachEngineeringChef(JsonTreeChef):
                             title=resource["title"],
                             lang=LANG)
             collection.to_file(channel_tree)
-            #if counter == 0:
-            #    break
-            #counter += 1
         living_labs = LivingLabs()
         channel_tree["children"].append(living_labs.sections(channel_tree))
         return channel_tree
