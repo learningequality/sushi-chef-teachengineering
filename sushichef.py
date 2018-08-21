@@ -65,14 +65,7 @@ def test():
     """
     Test individual resources
     """
-    #url = "https://www.teachengineering.org/activities/view/gat_esr_test_activity1"
-    #url = "https://www.teachengineering.org/curricularunits/view/cub_dams"
-    #url = "https://www.teachengineering.org/curricularunits/view/umo_sensorswork_unit"
     url = "https://www.teachengineering.org/curricularunits/view/cub_service_unit"
-    #collection_type = "Sprinkles"
-    #collection_type = "MakerChallenges"
-    #collection_type = "Lessons"
-    #collection_type = "Activities"
     collection_type = "CurricularUnits"
     channel_tree = dict(
         source_domain="teachengineering.org",
@@ -87,12 +80,12 @@ def test():
 
     try:
         subtopic_name = "test"
-        document = downloader.read(url, loadjs=False, session=sess)
-        page = BeautifulSoup(document, 'html.parser')
-        collection = Collection(page, filepath="/tmp/lesson-"+subtopic_name+".zip",
-            source_id=url,
-            type=collection_type)
-        collection.to_file(PATH, [collection_type.lower()])
+        collection = Collection(url, 
+            title="test",
+            source_id="test",
+            type=collection_type,
+            lang="en")
+        collection.to_file(channel_tree)
     except requests.exceptions.HTTPError as e:
         LOGGER.info("Error: {}".format(e))
 
@@ -164,7 +157,12 @@ class ResourceBrowser(object):
                 while len(queue) > 0:
                     resource = queue.pop(0)
                     url = self.build_resource_url(resource["id"], resource["collection"])
+                    if resource["spanishVersionId"] is not None:
+                        url_es = self.build_resource_url(resource["spanishVersionId"], resource["collection"])
+                    else:
+                        url_es = None
                     yield dict(url=url, collection=resource["collection"],
+                        url_es=url_es,
                         spanishVersionId=resource["spanishVersionId"],
                         title=resource["title"], summary=resource["summary"],
                         grade_target=resource["gradeTarget"],
@@ -182,9 +180,12 @@ class Menu(object):
     """
         This class checks elements on the lesson menu and build the menu list
     """
-    def __init__(self, page, filepath=None, id_=None, exclude_titles=None,
-                include_titles=None):
-        self.body = page.find("div", id=id_)
+    def __init__(self, page, filepath=None, id_=None, exclude_titles=None, 
+                include_titles=None, lang="en"):
+        if page:
+            self.body = page.find("div", id=id_)
+        else:
+            self.body = None
         self.menu = OrderedDict()
         self.filepath = filepath
         self.exclude_titles = [] if exclude_titles is None else exclude_titles
@@ -248,9 +249,6 @@ class Menu(object):
         li = ['<ul class="sidebar-items">']
         for e in self.menu.values():
             li.append("<li>")
-            #if active_li is not None and e["filename"] == active_li:
-            #    li.append('{text}'.format(text=e["text"]))
-            #else:
             li.append('<a href="{directory}{filename}" class="sidebar-link">{text}</a>'.format(directory=directory, **e))
             li.append("</li>")
         li.append("</ul>")
@@ -284,13 +282,15 @@ class CurriculumType(object):
         for meta_section in self.sections:
             Section = meta_section["class"]
             if isinstance(Section, list):
-                section = sum([subsection(page, filename=menu_filename,
-                                menu_name=meta_section["menu_name"])
+                section = sum([subsection(page, filename=menu_filename, 
+                                menu_name=meta_section["menu_name"], lang=lang,
+                                resource_url=resource_url)
                                 for subsection in Section])
                 section.id = meta_section["id"] 
             else:
-                section = Section(page, filename=menu_filename, id_=meta_section["id"],
-                                menu_name=meta_section["menu_name"])
+                section = Section(page, filename=menu_filename, id_=meta_section["id"], 
+                                menu_name=meta_section["menu_name"], lang=lang,
+                                resource_url=resource_url)
             yield section
 
 
@@ -300,7 +300,7 @@ class Activity(CurriculumType):
         self.name = "Activities"
         self.sections = [
             {"id": "quick", "class": QuickLook, "menu_name": "quick_look"},
-            {"id": None, "class": [CurriculumHeader, Summary, EngineeringConnection],
+            {"id": "summary", "class": [CurriculumHeader, Summary, EngineeringConnection], 
             "menu_name": "summary"},
             {"id": "prereq", "class": CollectionSection, "menu_name": "pre-req_knowledge"},
             {"id": "objectives", "class": CollectionSection, "menu_name": "learning_objectives"},
@@ -409,18 +409,14 @@ class Collection(object):
             if self.title is None:
                 self.title = title
             self.contribution_by = None
-            filepath = build_path(['chefdata', 'menu', self.title])
-            self.filepath = "{path}/{source_id}.zip".format(path=filepath,
-                source_id=source_id)
-            self.menu = Menu(self.page, filepath=self.filepath, id_="CurriculumNav",
-                exclude_titles=["Attachments", "Comments"], include_titles=["Quick Look"])
-            self.menu.add("Info")
             self.source_id = source_id
             self.resource_url = url.strip()
             self.type = type
             self.license = None
-
-            if type == "MakerChallenges":
+            self.lang = lang
+            self.subjects_area = subjects_area
+            
+            if self.type == "MakerChallenges":
                 self.curriculum_type = MakerChallenge()
             elif self.type == "Lessons":
                 self.curriculum_type = Lesson()
@@ -911,8 +907,8 @@ class UnitSchedule(CollectionSection):
 
 
 class EngineeringConnection(CollectionSection):
-    def __init__(self, page, filename=None, id_="engineering_connection",
-                menu_name="engineering_connection"):
+    def __init__(self, page, filename=None, id_="engineering_connection", 
+                menu_name="engineering_connection", lang="en", resource_url=None):
         super(EngineeringConnection, self).__init__(page, filename=filename,
                 id_=id_, menu_name=menu_name, lang=lang, resource_url=resource_url)
         self.body = page.find(lambda tag: tag.name=="section" and\
@@ -1521,8 +1517,9 @@ class TeachEngineeringChef(JsonTreeChef):
             title='TeachEngineering',
             children=[]
         )
-        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,
-                                    TeachEngineeringChef.CRAWLING_STAGE_OUTPUT)
+        lang = options.get('lang', 'en')
+        crawling_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,                     
+                                    TeachEngineeringChef.CRAWLING_STAGE_OUTPUT_TPL.format(lang))
         curriculum_url = urljoin(TeachEngineeringChef.ROOT_URL.format(HOSTNAME=TeachEngineeringChef.HOSTNAME), "curriculum/browse")
         resource_browser = ResourceBrowser(curriculum_url)
         for data in resource_browser.run():
@@ -1556,10 +1553,16 @@ class TeachEngineeringChef(JsonTreeChef):
         
         self.write_tree_to_json(channel_tree, lang)
 
-        channel_tree = self._build_scraping_json_tree(web_resource_tree)
-        scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR,
-                                TeachEngineeringChef.SCRAPING_STAGE_OUTPUT)
+    def write_tree_to_json(self, channel_tree, lang):
+        scrape_stage = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
+                                TeachEngineeringChef.SCRAPING_STAGE_OUTPUT_TPL.format(lang))
         write_tree_to_json_tree(scrape_stage, channel_tree)
+
+    def get_json_tree_path(self, **kwargs):
+        lang = kwargs.get('lang', "en")
+        json_tree_path = os.path.join(TeachEngineeringChef.TREES_DATA_DIR, 
+                    TeachEngineeringChef.SCRAPING_STAGE_OUTPUT_TPL.format(lang))
+        return json_tree_path
 
     def _build_scraping_json_tree(self, web_resource_tree):
         LANG = 'en'
@@ -1573,7 +1576,6 @@ class TeachEngineeringChef(JsonTreeChef):
             children=[],
             license=TeachEngineeringChef.LICENSE,
         )
-        #counter = 0
         for resource in web_resource_tree["children"]:
             collection = Collection(resource["url"],
                             source_id=resource["id"],
@@ -1581,9 +1583,6 @@ class TeachEngineeringChef(JsonTreeChef):
                             title=resource["title"],
                             lang=LANG)
             collection.to_file(channel_tree)
-            #if counter == 0:
-            #    break
-            #counter += 1
         living_labs = LivingLabs()
         channel_tree["children"].append(living_labs.sections(channel_tree))
         return channel_tree
